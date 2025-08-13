@@ -1,9 +1,23 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_code_editor/flutter_code_editor.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:highlight/languages/java.dart';
+
+// Import the languages you need
 import 'package:highlight/languages/javascript.dart';
 import 'package:highlight/languages/python.dart';
 import 'package:highlight/languages/cpp.dart';
-import 'package:flutter_highlight/themes/github.dart';
+
+// Import a dark theme for the editor
+import 'package:flutter_highlight/themes/monokai-sublime.dart';
+
+// --- (You can move these to a central constants file) ---
+const kBackgroundColor = Color(0xFF0D1117);
+const kCardColor = Color(0xFF161B22);
+const kPrimaryColor = Color(0xFF23D997);
+const kSecondaryTextColor = Color(0xFF8B949E);
+const kInputBorderColor = Color(0xFF30363D);
 
 class CodeEditor extends StatefulWidget {
   final String initialCode;
@@ -25,79 +39,60 @@ class CodeEditor extends StatefulWidget {
 
 class _CodeEditorState extends State<CodeEditor> {
   late CodeController _controller;
-  late String _lang;
+  late String _currentLanguage;
 
-  Map<String, TextStyle> get theme =>
-      githubTheme.map((key, value) => MapEntry(key, value));
+  // Use a proper dark theme for the code editor
+  final Map<String, TextStyle> _codeTheme = monokaiSublimeTheme;
 
   @override
   void initState() {
     super.initState();
-    _lang = widget.language;
+    _currentLanguage = widget.language;
     _controller = CodeController(
       text: widget.initialCode,
-      language: _hl(_lang),
+      language: _getHighlightLanguage(_currentLanguage),
     );
     _controller.addListener(() {
-      widget.onChanged?.call(_controller.text, _lang);
+      widget.onChanged?.call(_controller.text, _currentLanguage);
     });
   }
 
   @override
   void didUpdateWidget(covariant CodeEditor oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.initialCode != widget.initialCode &&
-        widget.initialCode != _controller.text) {
+    // Update code only if it's different from the controller's current text
+    if (widget.initialCode != oldWidget.initialCode && widget.initialCode != _controller.text) {
       _controller.text = widget.initialCode;
     }
-    if (oldWidget.language != widget.language) {
-      _lang = widget.language;
-      _controller.language = _hl(_lang);
+    // Update language if it changes
+    if (widget.language != oldWidget.language) {
+      setState(() {
+        _currentLanguage = widget.language;
+        _controller.language = _getHighlightLanguage(_currentLanguage);
+      });
     }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          children: [
-            const Text('Language:'),
-            const SizedBox(width: 8),
-            DropdownButton<String>(
-              value: _lang,
-              items: const [
-                DropdownMenuItem(
-                    value: 'javascript', child: Text('JavaScript')),
-                DropdownMenuItem(value: 'python', child: Text('Python')),
-                DropdownMenuItem(value: 'cpp', child: Text('C++')),
-              ],
-              onChanged: widget.readOnly
-                  ? null
-                  : (v) {
-                if (v == null) return;
-                setState(() {
-                  _lang = v;
-                  _controller.language = _hl(_lang);
-                });
-                widget.onChanged?.call(_controller.text, _lang);
-              },
-            ),
-          ],
-        ),
+        _buildHeaderBar(),
+        const SizedBox(height: 8),
         Expanded(
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-                border: Border.all(color: Theme.of(context).dividerColor)),
-            child: CodeTheme(
-              data: CodeThemeData(styles: theme),
-              child: CodeField(
-                controller: _controller,
-                readOnly: widget.readOnly,
-                textStyle:
-                const TextStyle(fontFamily: 'monospace', fontSize: 13),
-              ),
+          child: CodeTheme(
+            data: CodeThemeData(styles: _codeTheme),
+            child: CodeField(
+              controller: _controller,
+              readOnly: widget.readOnly,
+              textStyle: GoogleFonts.firaCode(fontSize: 14), // Use a popular coding font
+              background: kCardColor, // Set a matching background color
             ),
           ),
         ),
@@ -105,11 +100,74 @@ class _CodeEditorState extends State<CodeEditor> {
     );
   }
 
-  static var _languages = {
+  Widget _buildHeaderBar() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      decoration: BoxDecoration(
+        color: kBackgroundColor,
+        border: Border(bottom: BorderSide(color: kInputBorderColor)),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          _buildLanguageSelector(),
+          IconButton(
+            icon: const Icon(Icons.copy_all_rounded, color: kSecondaryTextColor, size: 20),
+            tooltip: 'Copy Code',
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: _controller.text));
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Code copied to clipboard!')),
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLanguageSelector() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: kCardColor,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: DropdownButton<String>(
+        value: _currentLanguage,
+        isDense: true,
+        dropdownColor: kCardColor,
+        style: GoogleFonts.poppins(color: Colors.white, fontSize: 14),
+        underline: const SizedBox.shrink(), // Remove the default underline
+        icon: const Icon(Icons.keyboard_arrow_down_rounded, color: kSecondaryTextColor, size: 20),
+        items: const [
+          DropdownMenuItem(value: 'javascript', child: Text('JavaScript')),
+          DropdownMenuItem(value: 'python', child: Text('Python')),
+          DropdownMenuItem(value: 'cpp', child: Text('C++')),
+          DropdownMenuItem(value: 'java', child: Text('Java')),
+        ],
+        onChanged: widget.readOnly
+            ? null
+            : (value) {
+          if (value == null) return;
+          setState(() {
+            _currentLanguage = value;
+            _controller.language = _getHighlightLanguage(_currentLanguage);
+          });
+          widget.onChanged?.call(_controller.text, _currentLanguage);
+        },
+      ),
+    );
+  }
+
+  // Helper map for languages
+  static final _languages = {
     'javascript': javascript,
     'python': python,
     'cpp': cpp,
+    'java': java,
   };
 
-  static dynamic _hl(String lang) => _languages[lang] ?? javascript;
+  // Helper function to get the language syntax highlighter
+  static dynamic _getHighlightLanguage(String lang) => _languages[lang] ?? javascript;
 }

@@ -72,7 +72,7 @@ class _SignupPageState extends State<SignupPage> {
         const CodeMintLogo(size: 80),
         const SizedBox(height: 20),
         Text(
-          'Join the Community',
+          'CodeMint',
           style: GoogleFonts.poppins(
             color: Colors.white,
             fontSize: 28,
