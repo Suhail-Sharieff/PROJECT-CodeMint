@@ -34,10 +34,10 @@ class _VerifyEmailPageState extends State<VerifyEmailPage> {
     super.dispose();
   }
 
-  Future<void> _handleSendVerification(BuildContext context) async{
+  Future<void> _handleSendVerification(BuildContext context) async {
     // Your logic to send the verification link
     await AuthMethods.sendVerifyLink(context: context);
-    showToast(context,'Email sent! Pls login!', ToastType.SUCCESS);
+    showToast(context, 'Email sent! Pls login!', ToastType.SUCCESS);
     // For this UI demo, we'll just toggle the state
     if (_emailController.text.isNotEmpty) {
       setState(() {
@@ -57,7 +57,10 @@ class _VerifyEmailPageState extends State<VerifyEmailPage> {
         backgroundColor: Colors.transparent,
         elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new_rounded, color: kSecondaryTextColor),
+          icon: const Icon(
+            Icons.arrow_back_ios_new_rounded,
+            color: kSecondaryTextColor,
+          ),
           onPressed: () => Navigator.of(context).pop(),
         ),
       ),
@@ -86,8 +89,9 @@ class _VerifyEmailPageState extends State<VerifyEmailPage> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _buildHeader(
-          title: 'Verify Your Email',
-          subtitle: 'Enter your email below and we’ll send a verification link to your inbox.',
+          title: 'You need to verify your email first!',
+          subtitle:
+              'Enter your email below and we’ll send a verification link to your inbox.',
         ),
         const SizedBox(height: 40),
         TextFormField(
@@ -109,7 +113,7 @@ class _VerifyEmailPageState extends State<VerifyEmailPage> {
               borderRadius: BorderRadius.circular(12),
             ),
           ),
-          onPressed: ()async{
+          onPressed: () async {
             await _handleSendVerification(context);
           },
           child: Text(
@@ -134,7 +138,8 @@ class _VerifyEmailPageState extends State<VerifyEmailPage> {
         const SizedBox(height: 24),
         _buildHeader(
           title: 'Check Your Inbox!',
-          subtitle: 'We’ve sent a verification link to your email. Please check your inbox and follow the link to continue.',
+          subtitle:
+              'We’ve sent a verification link to your email. Please check your inbox and spam and follow the link to continue.',
         ),
         const SizedBox(height: 32),
         ElevatedButton(
@@ -149,7 +154,7 @@ class _VerifyEmailPageState extends State<VerifyEmailPage> {
           ),
           onPressed: () {
             // Navigate to the login page
-            // Navigator.of(context).pushNamedAndRemoveUntil(login_route, (_) => false);
+            Navigator.of(context).pushReplacementNamed(login_route);
           },
           child: Text(
             'Back to Login',

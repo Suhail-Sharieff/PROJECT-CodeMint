@@ -1,5 +1,6 @@
 import 'package:code_mint_frontend/pages/login_page.dart';
 import 'package:code_mint_frontend/pages/verify_email_page.dart';
+import 'package:code_mint_frontend/widgets/show_toast.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
@@ -158,6 +159,10 @@ class _SignupPageState extends State<SignupPage> {
             ),
           ),
           onPressed: () async {
+            if(_passwordController.text!=_confirmPasswordController.text){
+              showToast(context, "Password and confirm password must be same!", ToastType.WARNING);
+              return;
+            }
             if (await AuthMethods.signUp(
                 email: _emailController.text,
                 password: _passwordController.text,context: context)) {
