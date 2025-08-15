@@ -9,7 +9,7 @@ connectTodb()
             process.env.PORT||8080,
             "0.0.0.0",
             ()=>{
-                console.log(`SERVER RUNNING: GO TO http://localhost:${process.env.PORT}/`);
+                console.log(`SERVER RUNNING: GO TO ${process.env.MAIN_URI}`);
             }
         )
     }

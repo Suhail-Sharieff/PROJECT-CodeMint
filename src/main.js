@@ -1,11 +1,10 @@
 
 
 import express, { json, urlencoded} from 'express'
-import { Server } from 'socket.io'
-import { createServer } from 'http'
 import cors from "cors"
 import cookieParser from "cookie-parser"
-
+import { Server } from 'socket.io'
+import { createServer } from 'http'
 
 const app=express()
 app.use(
@@ -36,7 +35,7 @@ app.use(
 )
 
 
-//---------------heart of app
+
 
 const server=createServer(app)
 const io = new Server(server, {
@@ -44,14 +43,22 @@ const io = new Server(server, {
         origin: process.env.CORS_ORIGIN
     }
 })
+import { initSocketHandlers } from './controllers/session.controller.js'
+initSocketHandlers(io);
+
 
 
 import { userRouter } from './routes/user_routes.js'
 app.use('/api/users',userRouter)
 
 
+import { sessionRouter } from './routes/session_routes.js'
+app.use('/api/session',sessionRouter)
+
+
 
 import { ApiError } from './utils/api_error.js'
+
 app.use((err, req, res, next) => {
     if (err instanceof ApiError) {
         return res.status(err.statusCode).json({
@@ -71,4 +78,4 @@ app.use((err, req, res, next) => {
     throw err;
 });
 
-export {app}
+export {app,io}
