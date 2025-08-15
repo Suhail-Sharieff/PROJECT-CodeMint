@@ -1,18 +1,18 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_code_editor/flutter_code_editor.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:highlight/languages/java.dart';
-
-// Import the languages you need
 import 'package:highlight/languages/javascript.dart';
 import 'package:highlight/languages/python.dart';
 import 'package:highlight/languages/cpp.dart';
-
-// Import a dark theme for the editor
 import 'package:flutter_highlight/themes/monokai-sublime.dart';
 
-// --- (You can move these to a central constants file) ---
+import '../services/api/socket_service.dart';
+
+
+
 const kBackgroundColor = Color(0xFF0D1117);
 const kCardColor = Color(0xFF161B22);
 const kPrimaryColor = Color(0xFF23D997);
@@ -23,12 +23,14 @@ class CodeEditor extends StatefulWidget {
   final String initialCode;
   final String language;
   final bool readOnly;
+  final SocketService socketService;
   final void Function(String code, String language)? onChanged;
 
   const CodeEditor({
     super.key,
     required this.initialCode,
     required this.language,
+    required this.socketService,
     this.readOnly = false,
     this.onChanged,
   });
@@ -40,9 +42,12 @@ class CodeEditor extends StatefulWidget {
 class _CodeEditorState extends State<CodeEditor> {
   late CodeController _controller;
   late String _currentLanguage;
-
-  // Use a proper dark theme for the code editor
   final Map<String, TextStyle> _codeTheme = monokaiSublimeTheme;
+
+  StreamSubscription<Map<String, dynamic>>? _codeUpdateSub;
+
+  Timer? _debounce;
+  bool _suppressLocalEmit = false;
 
   @override
   void initState() {
@@ -52,30 +57,81 @@ class _CodeEditorState extends State<CodeEditor> {
       text: widget.initialCode,
       language: _getHighlightLanguage(_currentLanguage),
     );
-    _controller.addListener(() {
-      widget.onChanged?.call(_controller.text, _currentLanguage);
+
+    _controller.addListener(_onLocalChange);
+
+    // listen to socket updates
+    _codeUpdateSub = widget.socketService.codeUpdate$.listen((data) {
+      final remoteCode = (data['code'] as String?) ?? '';
+      final remoteLang = (data['language'] as String?) ?? _currentLanguage;
+
+      if (remoteLang != _currentLanguage) {
+        setState(() {
+          _currentLanguage = remoteLang;
+          _controller.language = _getHighlightLanguage(_currentLanguage);
+        });
+      }
+
+      _applyRemoteText(remoteCode);
     });
+  }
+
+  void _onLocalChange() {
+    if (_suppressLocalEmit) return;
+
+    widget.onChanged?.call(_controller.text, _currentLanguage);
+
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 300), () {
+      widget.socketService.sendCode(_controller.text, _currentLanguage);
+    });
+  }
+
+  void _applyRemoteText(String newText) {
+    if (newText == _controller.text) return;
+    _suppressLocalEmit = true;
+
+    // try to preserve selection roughly
+    final oldSel = _controller.selection;
+    final oldBase = oldSel.baseOffset.clamp(0, _controller.text.length);
+    final oldExtent = oldSel.extentOffset.clamp(0, _controller.text.length);
+
+    _controller.text = newText;
+
+    final maxLen = newText.length;
+    final base = oldBase.clamp(0, maxLen);
+    final extent = oldExtent.clamp(0, maxLen);
+
+    _controller.selection = TextSelection(baseOffset: base, extentOffset: extent);
+
+    Future.microtask(() => _suppressLocalEmit = false);
   }
 
   @override
   void didUpdateWidget(covariant CodeEditor oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // Update code only if it's different from the controller's current text
+
     if (widget.initialCode != oldWidget.initialCode && widget.initialCode != _controller.text) {
-      _controller.text = widget.initialCode;
+      _applyRemoteText(widget.initialCode);
     }
-    // Update language if it changes
-    if (widget.language != oldWidget.language) {
+
+    if (widget.language != oldWidget.language && widget.language != _currentLanguage) {
       setState(() {
         _currentLanguage = widget.language;
         _controller.language = _getHighlightLanguage(_currentLanguage);
       });
+
+      // broadcast language change to peers
+      widget.socketService.sendCode(_controller.text, _currentLanguage);
     }
   }
 
   @override
   void dispose() {
+    _debounce?.cancel();
+    _controller.removeListener(_onLocalChange);
     _controller.dispose();
+    _codeUpdateSub?.cancel();
     super.dispose();
   }
 
@@ -91,8 +147,8 @@ class _CodeEditorState extends State<CodeEditor> {
             child: CodeField(
               controller: _controller,
               readOnly: widget.readOnly,
-              textStyle: GoogleFonts.firaCode(fontSize: 14), // Use a popular coding font
-              background: kCardColor, // Set a matching background color
+              textStyle: GoogleFonts.firaCode(fontSize: 14),
+              background: kCardColor,
             ),
           ),
         ),
@@ -138,7 +194,7 @@ class _CodeEditorState extends State<CodeEditor> {
         isDense: true,
         dropdownColor: kCardColor,
         style: GoogleFonts.poppins(color: Colors.white, fontSize: 14),
-        underline: const SizedBox.shrink(), // Remove the default underline
+        underline: const SizedBox.shrink(),
         icon: const Icon(Icons.keyboard_arrow_down_rounded, color: kSecondaryTextColor, size: 20),
         items: const [
           DropdownMenuItem(value: 'javascript', child: Text('JavaScript')),
@@ -154,13 +210,14 @@ class _CodeEditorState extends State<CodeEditor> {
             _currentLanguage = value;
             _controller.language = _getHighlightLanguage(_currentLanguage);
           });
+          // emit new language along with current code
+          widget.socketService.sendCode(_controller.text, _currentLanguage);
           widget.onChanged?.call(_controller.text, _currentLanguage);
         },
       ),
     );
   }
 
-  // Helper map for languages
   static final _languages = {
     'javascript': javascript,
     'python': python,
@@ -168,6 +225,5 @@ class _CodeEditorState extends State<CodeEditor> {
     'java': java,
   };
 
-  // Helper function to get the language syntax highlighter
   static dynamic _getHighlightLanguage(String lang) => _languages[lang] ?? javascript;
 }

@@ -86,6 +86,16 @@ class SocketService {
     socket.emit('submit-test', {'code': code, 'language': language});
   }
 
+  // Stream<Map<String, dynamic>> get newSubmission$ => _createStream('new-submission');
+  //
+  // // Stream for when a test is ended by the teacher
+  // Stream<void> get testEnded$ => _createStream('test-ended');
+
+  // Method for the teacher to end the test
+  void endTest() {
+    socket.emit('end-test');
+  }
+
   void disconnect() {
     socket.dispose();
     _sessionStateCtrl.close();
