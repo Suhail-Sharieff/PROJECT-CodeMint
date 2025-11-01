@@ -93,7 +93,7 @@ io.on('connection', (socket) => {
     console.log(`${userName} (${role}) joined session ${sessionId}`);
   });
   
-
+// when client/teacher codes, we need to inform  or broadcasr everyone
   socket.on('code-change', (data) => {
     const participant = participants.get(socket.id);
     if (!participant) return;
@@ -135,7 +135,7 @@ io.on('connection', (socket) => {
     if (!session) return;
     
     const message = {
-      id: uuidv4(),
+      id: uuidv4(),//we need unique id for each 
       userId: socket.id,
       userName: participant.name,
       role: participant.role,
@@ -148,7 +148,9 @@ io.on('connection', (socket) => {
 
     io.to(sessionId).emit('chat-message', message);
   });
-  
+
+
+  //---------------need to debug test management
 
   socket.on('start-test', (data) => {
     const participant = participants.get(socket.id);
