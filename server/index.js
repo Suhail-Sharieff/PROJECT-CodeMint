@@ -20,7 +20,7 @@ app.use(express.json());
 const sessions = new Map();
 const participants = new Map();
 
-// Create a new coding session
+
 app.post('/api/create-session', (req, res) => {
   const { teacherName } = req.body;
   const sessionId = uuidv4();
@@ -40,7 +40,7 @@ app.post('/api/create-session', (req, res) => {
   res.json({ sessionId, joinLink: `http://localhost:5173/join/${sessionId}` });
 });
 
-// Get session details
+
 app.get('/api/session/:sessionId', (req, res) => {
   const { sessionId } = req.params;
   const session = sessions.get(sessionId);
@@ -55,7 +55,7 @@ app.get('/api/session/:sessionId', (req, res) => {
 io.on('connection', (socket) => {
   console.log('User connected:', socket.id);
   
-  // Join a coding session
+
   socket.on('join-session', (data) => {
     const { sessionId, userName, role } = data;
     const session = sessions.get(sessionId);
@@ -77,7 +77,7 @@ io.on('connection', (socket) => {
     session.participants.push(participant);
     participants.set(socket.id, { sessionId, ...participant });
     
-    // Send current session state to the new participant
+
     socket.emit('session-state', {
       code: session.code,
       language: session.language,
@@ -87,13 +87,13 @@ io.on('connection', (socket) => {
       testData: session.testData
     });
     
-    // Notify others about new participant
+
     socket.to(sessionId).emit('participant-joined', participant);
     
     console.log(`${userName} (${role}) joined session ${sessionId}`);
   });
   
-  // Handle code changes
+
   socket.on('code-change', (data) => {
     const participant = participants.get(socket.id);
     if (!participant) return;
@@ -102,7 +102,6 @@ io.on('connection', (socket) => {
     const session = sessions.get(sessionId);
     if (!session) return;
     
-    // Only teacher can broadcast code changes to all students
     if (participant.role === 'teacher') {
       session.code = data.code;
       session.language = data.language;
@@ -126,7 +125,7 @@ io.on('connection', (socket) => {
     }
   });
   
-  // Handle chat messages
+
   socket.on('chat-message', (data) => {
     const participant = participants.get(socket.id);
     if (!participant) return;
@@ -146,11 +145,11 @@ io.on('connection', (socket) => {
     
     session.chat.push(message);
     
-    // Broadcast message to all participants in the session
+
     io.to(sessionId).emit('chat-message', message);
   });
   
-  // Handle test mode
+
   socket.on('start-test', (data) => {
     const participant = participants.get(socket.id);
     if (!participant || participant.role !== 'teacher') return;
@@ -170,7 +169,7 @@ io.on('connection', (socket) => {
     io.to(sessionId).emit('test-started', session.testData);
   });
   
-  // Handle test submission
+  
   socket.on('submit-test', (data) => {
     const participant = participants.get(socket.id);
     if (!participant) return;
@@ -189,7 +188,6 @@ io.on('connection', (socket) => {
     
     session.testData.submissions.push(submission);
     
-    // Notify teacher about submission
     const teacherSockets = [...io.sockets.sockets.values()]
       .filter(s => {
         const p = participants.get(s.id);
@@ -203,7 +201,7 @@ io.on('connection', (socket) => {
     socket.emit('submission-received');
   });
   
-  // Handle disconnect
+
   socket.on('disconnect', () => {
     const participant = participants.get(socket.id);
     if (participant) {
