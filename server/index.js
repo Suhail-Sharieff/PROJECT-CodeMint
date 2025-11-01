@@ -16,7 +16,7 @@ const io = socketIo(server, {
 app.use(cors());
 app.use(express.json());
 
-// Store active sessions and participants
+// 
 const sessions = new Map();
 const participants = new Map();
 
