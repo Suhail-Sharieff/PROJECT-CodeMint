@@ -16,11 +16,11 @@ const io = socketIo(server, {
 app.use(cors());
 app.use(express.json());
 
-// 
+// we will be using Map to map sessiona and its participants
 const sessions = new Map();
 const participants = new Map();
 
-
+//frontend will call this Api to create session
 app.post('/api/create-session', (req, res) => {
   const { teacherName } = req.body;
   const sessionId = uuidv4();
@@ -51,7 +51,7 @@ app.get('/api/session/:sessionId', (req, res) => {
   
   res.json(session);
 });
-
+//when client connects for first tim
 io.on('connection', (socket) => {
   console.log('User connected:', socket.id);
   
@@ -77,7 +77,7 @@ io.on('connection', (socket) => {
     session.participants.push(participant);
     participants.set(socket.id, { sessionId, ...participant });
     
-
+    // frontend wil call this to get session state
     socket.emit('session-state', {
       code: session.code,
       language: session.language,
