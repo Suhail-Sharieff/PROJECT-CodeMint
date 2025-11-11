@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Clock, Send, CheckCircle } from 'lucide-react';
 import CodeEditor from './CodeEditor';
 
@@ -20,9 +20,8 @@ const TestInterface: React.FC<TestInterfaceProps> = ({ socket, testData, languag
   const [code, setCode] = useState('// Write your solution here...\n');
   const [timeRemaining, setTimeRemaining] = useState(0);
   const [isSubmitted, setIsSubmitted] = useState(false);
-  const updateTimer = useRef<number | null>(null);
 
-  // Setup countdown timer
+  // 1. Setup countdown timer (Keep this, it handles the clock)
   useEffect(() => {
     if (testData) {
       const endTime =
@@ -38,6 +37,7 @@ const TestInterface: React.FC<TestInterfaceProps> = ({ socket, testData, languag
         );
         setTimeRemaining(currentRemaining);
 
+        // Sync timer with server
         socket.emit('test-timer-update', currentRemaining);
 
         if (currentRemaining === 0) {
@@ -49,24 +49,20 @@ const TestInterface: React.FC<TestInterfaceProps> = ({ socket, testData, languag
     }
   }, [testData, socket]);
 
-  // Send live code updates to teacher every 2 seconds
-  useEffect(() => {
-    if (!socket) return;
+  // 2. Handle Code Changes (Mimicking StudentView logic)
+  const handleCodeChange = (newCode: string | undefined) => {
+    if (typeof newCode === 'string') {
+      setCode(newCode);
 
-    if (updateTimer.current) clearInterval(updateTimer.current);
-    updateTimer.current = setInterval(() => {
-      if (testData && !isSubmitted && timeRemaining > 0) {
+      // Emit immediately if the test is active and not submitted
+      if (socket && testData && !isSubmitted && timeRemaining > 0) {
         socket.emit('code-change', {
-          code,
+          code: newCode,
           language
         });
       }
-    }, 2000);
-
-    return () => {
-      if (updateTimer.current) clearInterval(updateTimer.current);
-    };
-  }, [socket, code, language, testData, isSubmitted, timeRemaining]);
+    }
+  };
 
   const formatTime = (seconds: number) => {
     const minutes = Math.floor(seconds / 60);
@@ -149,12 +145,11 @@ const TestInterface: React.FC<TestInterfaceProps> = ({ socket, testData, languag
           </div>
 
           <div className="flex-1">
+            {/* Changed to use handleCodeChange directly */}
             <CodeEditor
               value={code}
               language={language}
-              onChange={(value) => {
-                if (typeof value === 'string') setCode(value);
-              }}
+              onChange={handleCodeChange}
             />
           </div>
         </div>
