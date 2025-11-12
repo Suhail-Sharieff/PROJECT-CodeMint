@@ -3,7 +3,6 @@ import { useParams, useLocation, useNavigate } from 'react-router-dom';
 import io, { Socket } from 'socket.io-client';
 import CodeEditor from './CodeEditor';
 import ChatPanel from './ChatPanel';
-import ParticipantsList from './ParticipantsList';
 import TestInterface from './TestInterface';
 import { Users, MessageSquare, Code, FileText, LogOut } from 'lucide-react';
 
