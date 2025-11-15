@@ -25,34 +25,54 @@ class SocketManager {
     setupMiddleware() {
         this.io.use(async (socket, next) => {
             try {
-                const token = socket.handshake.auth.token || socket.handshake.headers.authorization?.replace('Bearer ', '');
+                console.log('🔍 Socket middleware - Checking authentication...');
+                // console.log('🔍 Handshake auth:', socket.handshake.auth);
+                // console.log('🔍 Handshake headers:', socket.handshake.headers);
+                
+                const token = socket.handshake.auth?.token || socket.handshake.headers?.authorization?.replace('Bearer ', '');
+                
                 if (!token) {
+                    console.error('❌ No token provided in socket handshake');
+                    // console.error('   Auth object:', socket.handshake.auth);
+                    // console.error('   Headers:', socket.handshake.headers);
                     return next(new Error('Authentication error: No token provided'));
                 }
 
+                console.log('✅ Token found, verifying...');
                 const decoded = jwt.verify(token, process.env.ACCESS_TOKEN_SECRET);
+                console.log('✅ Token decoded successfully, user_id:', decoded.user_id);
+                
                 const [rows] = await db.execute(
                     "SELECT user_id, name, email FROM user WHERE user_id = ?",
                     [decoded.user_id]
                 );
 
                 if (rows.length === 0) {
+                    console.error('❌ User not found in database for user_id:', decoded.user_id);
                     return next(new Error('Authentication error: User not found'));
                 }
 
                 socket.user = rows[0];
+                console.log('✅ Socket authenticated for user:', rows[0].name);
                 next();
             } catch (err) {
-                next(new Error('Authentication error: Invalid token'));
+                console.error('❌ Socket authentication error:', err.message);
+                console.error('   Error stack:', err.stack);
+                next(new Error(`Authentication error: ${err.message}`));
             }
         });
     }
 
     setupEventHandlers() {
         this.io.on('connection', (socket) => {
-            console.log(`🔌 User connected: ${socket.user.name} SOCK_ID=(${socket.id})`);
+            console.log(`🔌 User connected: ${socket.user?.name || 'Unknown'} SOCK_ID=(${socket.id})`);
             this.handleConnection(socket);
             this.setupSocketEvents(socket);
+        });
+
+        // Handle connection errors
+        this.io.on('connection_error', (error) => {
+            console.error('❌ Socket connection error:', error.message);
         });
     }
 
@@ -90,6 +110,14 @@ class SocketManager {
             console.log(`🔌 User disconnected: ${name} (${socket.id})`);
             this.broadcastUserStatus(user_id, 'offline');
         });
+
+        socket.on('code-change',async(currCode)=>{
+            console.log(`currcode: ${currCode}`);
+            
+            this.io.emit('listen-code-change',currCode)
+        })
+
+
     }
 }
 
