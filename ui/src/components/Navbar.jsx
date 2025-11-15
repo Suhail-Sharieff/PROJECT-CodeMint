@@ -37,16 +37,16 @@ const Navbar = () => {
                <span className="hidden sm:block text-sm text-gray-400">Hi, <span className="text-emerald-400">{user.name}</span></span>
                <button 
                  onClick={handleLogout}
-                 className="text-sm text-gray-400 hover:text-white transition-colors"
+                 className="text-sm text-red-400 hover:text-red-300 transition-colors"
                >
                  Sign out
                </button>
-               <Link 
+               {/* <Link 
                  to="/editor" // Or dashboard
                  className="px-4 py-2 rounded-lg bg-gray-800 hover:bg-gray-700 text-white text-sm font-medium transition-all border border-gray-700"
                >
                  Go to Editor
-               </Link>
+               </Link> */}
             </>
           ) : (
             <>

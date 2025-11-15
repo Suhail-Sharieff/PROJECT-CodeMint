@@ -1,13 +1,17 @@
-// src/App.jsx - FINAL CORRECTED VERSION
+// src/App.jsx
 
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from './context/AuthContext';
 import { CircularProgress, Box } from '@mui/material';
+
 // --- Component and Page Imports ---
 import Layout from './components/Layout';
+import Navbar from './components/Navbar'; // <--- ADDED THIS IMPORT
 import HomePage from './pages/HomePage';
 import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
+import CodeEditor from './pages/CodeEditor'; // Ensure this path matches where you saved CodeEditor
+import TempEditor from './pages/TempEditor';
 
 function App() {
   const { user, isLoading } = useAuth();
@@ -23,11 +27,9 @@ function App() {
   return (
     <Router>
       <Routes>
+        {/* Public/Marketing Pages (Wrapped in standard Layout with Footer) */}
         <Route element={<Layout />}>
-          <Route
-            path="/"
-            element={<HomePage />}
-          />
+          <Route path="/" element={<HomePage />} />
           <Route 
             path="/login" 
             element={user ? <Navigate to="/" replace /> : <LoginPage />} 
@@ -36,8 +38,10 @@ function App() {
             path="/register" 
             element={user ? <Navigate to="/" replace /> : <RegisterPage />} 
           />
-
         </Route>
+
+       <Route path="/editor" element={<TempEditor />} />
+
       </Routes>
     </Router>
   );
