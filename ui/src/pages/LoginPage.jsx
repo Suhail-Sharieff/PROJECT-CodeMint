@@ -1,228 +1,93 @@
-// src/pages/LoginPage.jsx (Enhanced with Tailwind CSS)
-
 import React, { useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { useNavigate, Link as RouterLink } from 'react-router-dom';
-import { FaEye, FaEyeSlash } from 'react-icons/fa';
+import api from '../services/api';
 
 const LoginPage = () => {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [role, setRole] = useState('user');
-  const [error, setError] = useState('');
+  const [formData, setFormData] = useState({ email: '', password: '' });
   const [isLoading, setIsLoading] = useState(false);
-  const [showPassword, setShowPassword] = useState(false);
-  const [showForgotPasswordModal, setShowForgotPasswordModal] = useState(false);
-  const [forgotPasswordEmail, setForgotPasswordEmail] = useState('');
-
   const { login } = useAuth();
   const navigate = useNavigate();
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setError('');
     setIsLoading(true);
-
     try {
-      const user = await login(role, { email, password });
+      // Simulate API Call
+      // const res = await api.post('/auth/login', formData);
+      // login({ user: res.data.user });
       
-      switch (user.role) {
-        case 'Institution':
-          navigate('/dashboard/institution');
-          break;
-        case 'Department':
-          navigate('/dashboard/department');
-          break;
-        case 'User':
-          navigate('/dashboard/user');
-          break;
-        default:
-          navigate('/');
-          break;
-      }
-
-    } catch (err) {
-      const errorMessage = err.response?.data?.msg || 'Login failed. Please try again.';
-      setError(errorMessage);
+      // Mock Login for UI Demo
+      setTimeout(() => {
+        login({ user: { name: 'Demo User', email: formData.email } });
+        navigate('/');
+      }, 1000);
+      
+    } catch (error) {
+      console.error(error);
     } finally {
       setIsLoading(false);
     }
   };
 
-  const handleForgotPassword = (e) => {
-    e.preventDefault();
-    // Simple implementation - in a real app, you would send a request to your backend
-    alert(`Password reset instructions will be sent to ${forgotPasswordEmail} if it exists in our system.`);
-    setShowForgotPasswordModal(false);
-    setForgotPasswordEmail('');
-  };
-
-  // Helper for dynamic button styling
-  const getRoleButtonStyle = (buttonRole) => {
-    return role === buttonRole
-      ? 'bg-gradient-to-r from-[#0B95D6] to-[#0A7BB8] text-white shadow-lg'
-      : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-200 shadow-sm';
-  };
-
   return (
-    <div className="relative min-h-screen flex items-center justify-center p-4 overflow-hidden bg-gradient-to-br from-blue-50 via-white to-purple-50">
-      {/* Animated Background Elements */}
-      <div className="absolute inset-0 overflow-hidden">
-        <div className="absolute -top-20 -right-20 w-72 h-72 bg-[#0B95D6]/10 rounded-full mix-blend-multiply filter blur-xl animate-float"></div>
-        <div className="absolute top-40 -left-20 w-72 h-72 bg-[#F4B400]/10 rounded-full mix-blend-multiply filter blur-xl animate-float" style={{ animationDelay: '2s' }}></div>
-        <div className="absolute bottom-20 right-20 w-72 h-72 bg-purple-300/10 rounded-full mix-blend-multiply filter blur-xl animate-float" style={{ animationDelay: '4s' }}></div>
-      </div>
-
-      <div className="relative w-full max-w-md bg-white/95 backdrop-blur-md p-8 rounded-2xl shadow-2xl border border-white/20">
-        <h1 className="text-3xl font-bold text-center text-gray-900 mb-2">
-          Welcome Back
-        </h1>
-        <p className="text-center text-gray-600 mb-8">Select your role and sign in to your account</p>
-
-        {/* Role Selector */}
-        <div className="flex bg-gray-100 p-1 rounded-xl mb-8 gap-2">
-          {['user', 'department', 'institution'].map((roleOption) => (
-            <button 
-              key={roleOption}
-              onClick={() => setRole(roleOption)}
-              className={`flex-1 py-3 px-4 rounded-xl font-semibold transition-all duration-300 capitalize ${getRoleButtonStyle(roleOption)}`}
-            >
-              {roleOption}
-            </button>
-          ))}
-        </div>
-
-        {/* Login Form */}
-        <form onSubmit={handleSubmit} className="space-y-6">
-          <div className="space-y-2">
-            <label htmlFor="email" className="block text-sm font-medium text-gray-700 ml-1">Email Address</label>
-            <input
-              id="email"
-              name="email"
-              type="email"
-              autoComplete="email"
-              required
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="w-full px-4 py-3 bg-white border border-gray-200 text-gray-900 rounded-xl shadow-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#0B95D6] focus:border-transparent transition-all duration-300"
-              placeholder="Enter your email"
-            />
-          </div>
-
-          <div className="space-y-2">
-            <div className="flex justify-between items-center">
-              <label htmlFor="password" className="block text-sm font-medium text-gray-700 ml-1">Password</label>
-              <button 
-                type="button"
-                onClick={() => setShowForgotPasswordModal(true)}
-                className="text-xs text-[#0B95D6] hover:text-[#0A7BB8] transition-colors duration-300"
-              >
-                Forgot password?
-              </button>
-            </div>
-            <div className="relative">
-              <input
-                id="password"
-                name="password"
-                type={showPassword ? "text" : "password"}
-                autoComplete="current-password"
-                required
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full px-4 py-3 bg-white border border-gray-200 text-gray-900 rounded-xl shadow-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#0B95D6] focus:border-transparent transition-all duration-300 pr-12"
-                placeholder="Enter your password"
-              />
-              <button
-                type="button"
-                className="absolute inset-y-0 right-0 pr-3 mr-1.5 flex items-center justify-center w-8 h-8 my-auto rounded-full hover:bg-gray-200 transition-colors"
-                onClick={() => setShowPassword(!showPassword)}
-              >
-                {showPassword ? (
-                  <FaEyeSlash className="h-5 w-5 text-gray-500 relative left-1.5" />
-                ) : (
-                  <FaEye className="h-5 w-5 text-gray-500 relative left-1.5" />
-                )}
-              </button>
-            </div>
-          </div>
+    <div className="min-h-[calc(100vh-64px)] flex items-center justify-center p-4">
+      <div className="w-full max-w-md">
+        {/* Card */}
+        <div className="bg-[#161B22] rounded-2xl border border-gray-800 shadow-2xl p-8 relative overflow-hidden">
           
-          {error && (
-            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl text-center animate-shake">
-              <svg className="w-5 h-5 inline mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-              </svg>
-              {error}
-            </div>
-          )}
+          {/* Top decorative glow */}
+          <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full h-1 bg-gradient-to-r from-transparent via-emerald-500 to-transparent opacity-50"></div>
+          
+          <div className="text-center mb-8">
+            <h2 className="text-2xl font-bold text-white">Welcome Back</h2>
+            <p className="text-gray-400 text-sm mt-2">Sign in to continue to CodeMint</p>
+          </div>
 
-          <button
-            type="submit"
-            disabled={isLoading}
-            className="w-full py-3 px-4 rounded-xl shadow-lg text-sm font-medium text-white bg-gradient-to-r from-[#0B95D6] to-[#0A7BB8] hover:from-[#0A7BB8] hover:to-[#0B95D6] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#0B95D6] disabled:opacity-50 transition-all duration-300 transform hover:scale-[1.02] flex items-center justify-center"
-          >
-            {isLoading ? (
-              <>
-                <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                </svg>
-                Signing In...
-              </>
-            ) : (
-              'Sign In'
-            )}
-          </button>
-        </form>
-
-        <div className="mt-8 text-center">
-          <p className="text-sm text-gray-600">
-            Don't have an account?{' '}
-            <RouterLink 
-              to="/register" 
-              className="font-medium text-[#0B95D6] hover:text-[#0A7BB8] transition-colors duration-300"
-            >
-              Create an account
-            </RouterLink>
-          </p>
-        </div>
-      </div>
-
-      {/* Forgot Password Modal */}
-      {showForgotPasswordModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl w-full max-w-md p-6">
-            <h2 className="text-xl font-semibold text-gray-900 mb-4">Reset Password</h2>
-            <p className="text-gray-600 mb-4">
-              Enter your email address and we'll send you instructions to reset your password.
-            </p>
-            <form onSubmit={handleForgotPassword}>
+          <form onSubmit={handleSubmit} className="space-y-5">
+            <div>
+              <label className="block text-xs font-medium text-gray-400 uppercase tracking-wider mb-1.5">Email</label>
               <input
                 type="email"
-                placeholder="Enter your email"
-                value={forgotPasswordEmail}
-                onChange={(e) => setForgotPasswordEmail(e.target.value)}
-                className="w-full px-4 py-3 bg-white border border-gray-200 text-gray-900 rounded-xl shadow-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#0B95D6] focus:border-transparent transition-all duration-300 mb-4"
+                value={formData.email}
+                onChange={(e) => setFormData({...formData, email: e.target.value})}
+                className="w-full bg-[#0D1117] border border-gray-700 text-white px-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 transition-all placeholder-gray-600"
+                placeholder="dev@example.com"
                 required
               />
-              <div className="flex justify-end gap-3">
-                <button
-                  type="button"
-                  className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100 transition-colors"
-                  onClick={() => setShowForgotPasswordModal(false)}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 bg-[#0B95D6] rounded-lg text-white hover:bg-[#0A7BB8] transition-colors"
-                >
-                  Send Instructions
-                </button>
-              </div>
-            </form>
+            </div>
+            
+            <div>
+              <label className="block text-xs font-medium text-gray-400 uppercase tracking-wider mb-1.5">Password</label>
+              <input
+                type="password"
+                value={formData.password}
+                onChange={(e) => setFormData({...formData, password: e.target.value})}
+                className="w-full bg-[#0D1117] border border-gray-700 text-white px-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 transition-all placeholder-gray-600"
+                placeholder="••••••••"
+                required
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={isLoading}
+              className="w-full bg-emerald-500 hover:bg-emerald-400 text-[#0D1117] py-3.5 rounded-xl font-bold text-sm transition-all shadow-lg hover:shadow-emerald-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isLoading ? 'Authenticating...' : 'Sign In'}
+            </button>
+          </form>
+
+          <div className="mt-6 text-center">
+            <p className="text-sm text-gray-500">
+              Don't have an account?{' '}
+              <Link to="/register" className="text-emerald-400 hover:text-emerald-300 font-medium transition-colors">
+                Create one
+              </Link>
+            </p>
           </div>
         </div>
-      )}
+      </div>
     </div>
   );
 };

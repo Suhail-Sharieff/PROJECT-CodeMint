@@ -1,4 +1,4 @@
-// src/context/AuthContext.jsx - FINAL VERSION
+// src/context/AuthContext.jsx
 
 import React, { createContext, useState, useContext, useEffect } from 'react';
 import api from '../services/api';
@@ -9,51 +9,42 @@ export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  // This useEffect now has a crucial job: check for a logged-in user on initial load.
+  // Check if user is authenticated on mount (restore session from cookies)
   useEffect(() => {
-    const checkUser = async () => {
+    const checkAuth = async () => {
       try {
-        // Make a request to our new "showMe" endpoint.
-        // Axios will automatically send the httpOnly cookie.
-        const { data } = await api.get('/auth/showMe');
-        
-        // If the request is successful, the backend sends back the user.
-        // We set the user in our state.
-        setUser(data.user);
+        // Try to get current user from backend using httpOnly cookies
+        const res = await api.get('/auth/me');
+        if (res.data && res.data.data && res.data.data.user) {
+          setUser(res.data.data.user);
+        }
       } catch (error) {
-        // If the request fails (e.g., 401 Unauthorized), it means no valid cookie was found.
-        // In this case, the user is not logged in, so we do nothing.
-        // The `user` state remains null.
-        console.log('Not logged in');
+        // If request fails, user is not authenticated (token expired or missing)
+        // This is expected if user is not logged in, so we don't show an error
+        console.log('Not authenticated');
+        setUser(null);
       } finally {
-        // CRITICAL: No matter what happens, we are done loading.
-        // This prevents the "blank screen" bug.
         setIsLoading(false);
       }
     };
 
-    checkUser();
-  }, []); // The empty array [] means this effect runs only ONCE when the app first mounts.
+    checkAuth();
+  }, []); // Run only once on mount
 
-  const login = async (role, credentials) => {
-    const response = await api.post(`/auth/${role}/login`, credentials);
-    setUser(response.data.user);
-    return response.data.user;
+  // Login function - expects user data from LoginPage
+  const login = (userData) => {
+    setUser(userData.user);
   };
 
-  const register = async (role, details) => {
-    const response = await api.post(`/auth/${role}/register`, details);
-    setUser(response.data.user);
-    return response.data.user;
-  };
-
-  const logout = async () => {
-    await api.get('/auth/logout');
+  // Logout function
+  const logout = () => {
     setUser(null);
+    // Optionally call a logout endpoint to clear cookies on server
+    api.post('/auth/logout').catch(() => {});
   };
 
   return (
-    <AuthContext.Provider value={{ user, isLoading, login, register, logout }}>
+    <AuthContext.Provider value={{ user, isLoading, login, logout }}>
       {children}
     </AuthContext.Provider>
   );

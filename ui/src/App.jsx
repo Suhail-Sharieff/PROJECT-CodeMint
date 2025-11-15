@@ -26,24 +26,16 @@ function App() {
         <Route element={<Layout />}>
           <Route
             path="/"
-            element={
-              user ? (
-                <Navigate
-                  to={
-                    user.role === 'Institution' ? '/dashboard/institution' :
-                    user.role === 'Department' ? '/dashboard/department' :
-                    user.role === 'User' ? '/dashboard/user' :
-                    '/institutions' // Safe fallback
-                  }
-                  replace
-                />
-              ) : (
-                <HomePage />
-              )
-            }
+            element={<HomePage />}
           />
-          <Route path="/login" element={<LoginPage />} />
-          <Route path="/register" element={<RegisterPage />} />
+          <Route 
+            path="/login" 
+            element={user ? <Navigate to="/" replace /> : <LoginPage />} 
+          />
+          <Route 
+            path="/register" 
+            element={user ? <Navigate to="/" replace /> : <RegisterPage />} 
+          />
 
         </Route>
       </Routes>
