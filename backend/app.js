@@ -8,14 +8,14 @@ const app = express()
 
 
 app.use(
-    cors(//allow access for all
-        {
-            origin: process.env.CORS_ORIGIN,
-            credentials: true, // THIS IS CRITICAL for cookies to work
-            methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
-            allowedHeaders: ["Content-Type", "Authorization"]
-        }
-    )
+    cors({
+        origin: process.env.CORS_ORIGIN || "http://localhost:3000", // Default to frontend port for development
+        credentials: true, // THIS IS CRITICAL for cookies to work
+        methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+        allowedHeaders: ["Content-Type", "Authorization"],
+        preflightContinue: false,
+        optionsSuccessStatus: 204
+    })
 )
 
 
@@ -51,7 +51,8 @@ app.use(
 )
 export const inspector = (req, res, next) => {
     console.log(`🔎 Route [${req.method}] ${req.originalUrl}`);
-     next();
+        console.log(`📦 Body:`, req.body);
+    next();
 };
 
 app.use(inspector)
@@ -59,6 +60,8 @@ app.use(inspector)
 
 
 //configuring routes
+import {authRouter} from "./routes/auth.routes.js"
+app.use('/auth',authRouter)
 
 
 import { ApiError } from "./Utils/Api_Error.utils.js"
