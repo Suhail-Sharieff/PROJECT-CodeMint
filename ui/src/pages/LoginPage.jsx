@@ -1,95 +1,240 @@
-import React, { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { useAuth } from '../context/AuthContext';
-import api from '../services/api';
+import { useState } from "react";
+import {
+  Box,
+  Button,
+  TextField,
+  Typography,
+  Paper,
+  InputAdornment,
+  IconButton,
+  Alert,
+  CircularProgress,
+  Container,
+  CssBaseline,
+} from "@mui/material";
+import { ThemeProvider, createTheme } from "@mui/material/styles";
+import { Visibility, VisibilityOff, Code } from "@mui/icons-material";
+import { useNavigate } from "react-router-dom";
+import api from "../services/api";
+import { getErrorMessage } from "../services/errorHandler";
+import { useAuth } from "../context/AuthContext";
 
-const LoginPage = () => {
-  const [formData, setFormData] = useState({ email: '', password: '' });
-  const [isLoading, setIsLoading] = useState(false);
-  const { login } = useAuth();
+// 1. Define a custom Dark/Mint theme for CodeMint
+const darkTheme = createTheme({
+  palette: {
+    mode: 'dark',
+    primary: {
+      main: '#34D399', // Mint Green
+      contrastText: '#0D1117', // Dark background color for text on buttons
+    },
+    background: {
+      default: '#0D1117', // GitHub-style dark background
+      paper: '#161B22',   // Slightly lighter card background
+    },
+    text: {
+      primary: '#F0F6FC',
+      secondary: '#8B949E',
+    },
+  },
+  components: {
+    MuiTextField: {
+      styleOverrides: {
+        root: {
+          '& .MuiOutlinedInput-root': {
+            '& fieldset': { borderColor: '#30363D' },
+            '&:hover fieldset': { borderColor: '#8B949E' },
+            '&.Mui-focused fieldset': { borderColor: '#34D399' },
+          },
+        },
+      },
+    },
+  },
+});
+
+export default function LoginPage() {
   const navigate = useNavigate();
+  const { login } = useAuth();
 
-  const handleSubmit = async (e) => {
+  const [form, setForm] = useState({ email: "", password: "" });
+  const [showPassword, setShowPassword] = useState(false);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const handleChange = (e) => {
+    setForm({ ...form, [e.target.name]: e.target.value });
+    if (error) setError("");
+  };
+
+  const handleLogin = async (e) => {
     e.preventDefault();
-    setIsLoading(true);
+    setLoading(true);
+    setError("");
+
     try {
-      // Simulate API Call
-      // const res = await api.post('/auth/login', formData);
-      // login({ user: res.data.user });
-      
-      // Mock Login for UI Demo
-      setTimeout(() => {
-        login({ user: { name: 'Demo User', email: formData.email } });
-        navigate('/');
-      }, 1000);
-      
-    } catch (error) {
-      console.error(error);
+      const res = await api.post("/auth/login", form);
+
+      if (res.data && res.data.data && res.data.data.user) {
+        login({
+          user: res.data.data.user,
+          accessToken: res.data.data.accessToken,
+          refreshToken: res.data.data.refreshToken
+        });
+        navigate("/"); 
+      } else {
+        setError("Invalid response from server");
+      }
+    } catch (err) {
+      setError(getErrorMessage(err, "Login failed."));
     } finally {
-      setIsLoading(false);
+      setLoading(false);
     }
   };
 
   return (
-    <div className="min-h-[calc(100vh-64px)] flex items-center justify-center p-4">
-      <div className="w-full max-w-md">
-        {/* Card */}
-        <div className="bg-[#161B22] rounded-2xl border border-gray-800 shadow-2xl p-8 relative overflow-hidden">
-          
-          {/* Top decorative glow */}
-          <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full h-1 bg-gradient-to-r from-transparent via-emerald-500 to-transparent opacity-50"></div>
-          
-          <div className="text-center mb-8">
-            <h2 className="text-2xl font-bold text-white">Welcome Back</h2>
-            <p className="text-gray-400 text-sm mt-2">Sign in to continue to CodeMint</p>
-          </div>
-
-          <form onSubmit={handleSubmit} className="space-y-5">
-            <div>
-              <label className="block text-xs font-medium text-gray-400 uppercase tracking-wider mb-1.5">Email</label>
-              <input
-                type="email"
-                value={formData.email}
-                onChange={(e) => setFormData({...formData, email: e.target.value})}
-                className="w-full bg-[#0D1117] border border-gray-700 text-white px-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 transition-all placeholder-gray-600"
-                placeholder="dev@example.com"
-                required
-              />
-            </div>
-            
-            <div>
-              <label className="block text-xs font-medium text-gray-400 uppercase tracking-wider mb-1.5">Password</label>
-              <input
-                type="password"
-                value={formData.password}
-                onChange={(e) => setFormData({...formData, password: e.target.value})}
-                className="w-full bg-[#0D1117] border border-gray-700 text-white px-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 transition-all placeholder-gray-600"
-                placeholder="••••••••"
-                required
-              />
-            </div>
-
-            <button
-              type="submit"
-              disabled={isLoading}
-              className="w-full bg-emerald-500 hover:bg-emerald-400 text-[#0D1117] py-3.5 rounded-xl font-bold text-sm transition-all shadow-lg hover:shadow-emerald-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
+    <ThemeProvider theme={darkTheme}>
+      <CssBaseline />
+      <Box
+        sx={{
+          minHeight: "100vh",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          backgroundImage: "radial-gradient(circle at 50% -20%, #1f2937 0%, #0D1117 50%)", // Subtle glow at top
+          p: 2,
+        }}
+      >
+        <Container maxWidth="xs">
+          <Paper
+            elevation={0}
+            sx={{
+              p: 4,
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              borderRadius: 3,
+              border: "1px solid #30363D",
+              boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.5)",
+            }}
+          >
+            {/* Logo / Branding */}
+            <Box 
+              sx={{ 
+                display: 'flex', 
+                alignItems: 'center', 
+                gap: 1.5, 
+                mb: 1 
+              }}
             >
-              {isLoading ? 'Authenticating...' : 'Sign In'}
-            </button>
-          </form>
+              <Box 
+                sx={{ 
+                  bgcolor: 'primary.main', 
+                  p: 0.5, 
+                  borderRadius: 1, 
+                  display: 'flex' 
+                }}
+              >
+                <Code sx={{ color: '#0D1117', fontSize: 28 }} />
+              </Box>
+              <Typography variant="h5" fontWeight="800" color="white" letterSpacing={-0.5}>
+                CodeMint
+              </Typography>
+            </Box>
+            
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 4 }}>
+              Sign in to continue coding
+            </Typography>
 
-          <div className="mt-6 text-center">
-            <p className="text-sm text-gray-500">
-              Don't have an account?{' '}
-              <Link to="/register" className="text-emerald-400 hover:text-emerald-300 font-medium transition-colors">
-                Create one
-              </Link>
-            </p>
-          </div>
-        </div>
-      </div>
-    </div>
+            {error && (
+              <Alert 
+                severity="error" 
+                variant="outlined" 
+                sx={{ width: "100%", mb: 3, borderColor: '#ef4444', color: '#fca5a5' }}
+              >
+                {error}
+              </Alert>
+            )}
+
+            <Box component="form" onSubmit={handleLogin} sx={{ width: "100%" }}>
+              <TextField
+                margin="normal"
+                required
+                fullWidth
+                id="email"
+                label="Email Address"
+                name="email"
+                autoComplete="email"
+                autoFocus
+                value={form.email}
+                onChange={handleChange}
+                InputProps={{ sx: { borderRadius: 2 } }}
+              />
+              <TextField
+                margin="normal"
+                required
+                fullWidth
+                name="password"
+                label="Password"
+                type={showPassword ? "text" : "password"}
+                id="password"
+                autoComplete="current-password"
+                value={form.password}
+                onChange={handleChange}
+                InputProps={{
+                  sx: { borderRadius: 2 },
+                  endAdornment: (
+                    <InputAdornment position="end">
+                      <IconButton
+                        onClick={() => setShowPassword(!showPassword)}
+                        edge="end"
+                      >
+                        {showPassword ? <VisibilityOff /> : <Visibility />}
+                      </IconButton>
+                    </InputAdornment>
+                  ),
+                }}
+              />
+
+              <Button
+                type="submit"
+                fullWidth
+                variant="contained"
+                disabled={loading}
+                sx={{
+                  mt: 3,
+                  mb: 2,
+                  py: 1.5,
+                  borderRadius: 2,
+                  fontWeight: "bold",
+                  fontSize: "0.95rem",
+                  textTransform: "none",
+                  boxShadow: "0 0 15px rgba(52, 211, 153, 0.3)", // Mint glow
+                  '&:hover': {
+                    boxShadow: "0 0 25px rgba(52, 211, 153, 0.5)",
+                  }
+                }}
+              >
+                {loading ? <CircularProgress size={24} color="inherit" /> : "Sign in"}
+              </Button>
+
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 1 }}>
+                <Button 
+                    size="small" 
+                    onClick={() => navigate("/register")}
+                    sx={{ textTransform: 'none', color: 'primary.main' }}
+                >
+                    Create account
+                </Button>
+                <Button 
+                    size="small" 
+                    sx={{ textTransform: 'none', color: 'text.secondary' }}
+                >
+                    Forgot password?
+                </Button>
+              </Box>
+            </Box>
+          </Paper>
+        </Container>
+      </Box>
+    </ThemeProvider>
   );
-};
-
-export default LoginPage;
+}
