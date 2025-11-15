@@ -1,24 +1,28 @@
-import { configDotenv } from "dotenv"
-configDotenv()
-
-import express from "express"
-const app=express()
-
-import cors from "cors"
-app.use(cors({origin:"*"}))
-
-app.get("/",(req,res)=>{res.status(200).json("Backend running..")})
+import { app } from "./app.js";
+import { connect_To_DB, initDB } from "./Utils/sql_connection.js";
+import { init_query } from "./__init__.js";
+import { createServer } from "http";
+import { socketManager } from "./socket_events.js";
 
 
-import {createServer} from "http"
-const server=createServer(app)
-import { Server } from "socket.io"
-const io = new Server(server);
+const PORT = process.env.PORT;
 
-server.listen(process.env.PORT,()=>{
-    console.log(`Server running @ http://localhost:${process.env.PORT}`);
-});
+const startServer = async () => {
+  try {
+    await connect_To_DB();
+    await initDB(init_query);
 
-io.on('connection',(sock)=>{
-    console.log(sock.id);
-})
+    const server = createServer(app);
+
+    socketManager.initialize(server);
+
+    server.listen(PORT, "0.0.0.0", () => {
+      console.log(`✅ SERVER RUNNING: http://localhost:${PORT}`);
+    });
+  } catch (err) {
+    console.error("❌ SERVER ERROR:", err.message);
+    process.exit(1);
+  }
+};
+
+startServer();
