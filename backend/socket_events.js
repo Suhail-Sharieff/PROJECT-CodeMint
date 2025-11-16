@@ -12,130 +12,191 @@ class SocketManager {
     async initialize(server) {
         this.io = new Server(server, {
             cors: {
-                origin: process.env.CORS_ORIGIN || "http://localhost:3000", // Default to frontend port for development
+                origin: process.env.CORS_ORIGIN || "http://localhost:3000",
                 methods: ["GET", "POST"],
                 credentials: true
             }
         });
-
         await this.setupMiddleware();
         await this.setupEventHandlers();
-
         console.log("✅ Socket.IO initialized");
     }
 
     async setupMiddleware() {
         this.io.use(async (socket, next) => {
             try {
-                console.log('🔍 Socket middleware - Checking authentication...');
-                // console.log('🔍 Handshake auth:', socket.handshake.auth);
-                // console.log('🔍 Handshake headers:', socket.handshake.headers);
-                
                 const token = socket.handshake.auth?.token || socket.handshake.headers?.authorization?.replace('Bearer ', '');
-                
-                if (!token) {
-                    console.error('❌ No token provided in socket handshake');
-                    // console.error('   Auth object:', socket.handshake.auth);
-                    // console.error('   Headers:', socket.handshake.headers);
-                    return next(new Error('Authentication error: No token provided'));
-                }
+                if (!token) return next(new Error('Authentication error: No token'));
 
-                console.log('✅ Token found, verifying...');
                 const decoded = jwt.verify(token, process.env.ACCESS_TOKEN_SECRET);
-                console.log('✅ Token decoded successfully, user_id:', decoded.user_id);
-                
-                const [rows] = await db.execute(
-                    "SELECT user_id, name, email FROM user WHERE user_id = ?",
-                    [decoded.user_id]
-                );
+                const [rows] = await db.execute("SELECT user_id, name, email FROM user WHERE user_id = ?", [decoded.user_id]);
 
-                if (rows.length === 0) {
-                    console.error('❌ User not found in database for user_id:', decoded.user_id);
-                    return next(new Error('Authentication error: User not found'));
-                }
+                if (rows.length === 0) return next(new Error('User not found'));
 
                 socket.user = rows[0];
-                console.log('✅ Socket authenticated for user:', rows[0].name);
                 next();
             } catch (err) {
-                console.error('❌ Socket authentication error:', err.message);
-                console.error('   Error stack:', err.stack);
                 next(new Error(`Authentication error: ${err.message}`));
             }
         });
     }
 
     async setupEventHandlers() {
-        this.io.on('connection', async(socket) => {
-            console.log(`🔌 User connected: ${socket.user?.name || 'Unknown'} SOCK_ID=(${socket.id})`);
-            await this.handleConnection(socket);
-            await this.setupSocketEvents(socket);
-            await db.execute('update user set socket_id=? where user_id=?',[socket.id,socket.user.user_id])
-        });
+        this.io.on('connection', async (socket) => {
+            console.log(`🔌 User connected: ${socket.user.name} (${socket.id})`);
+            await this.setupSessionEvents(socket);
+            await db.execute('UPDATE user SET socket_id=? WHERE user_id=?', [socket.id, socket.user.user_id]);
 
-        // Handle connection errors
-        this.io.on('connection_error', (error) => {
-            console.error('❌ Socket connection error:', error.message);
+            socket.on('disconnect', () => {
+                console.log(`🔌 User disconnected: ${socket.user.name}`);
+            });
         });
     }
 
-    async handleConnection(socket) {
-        const { user_id } = socket.user;
-
-        await this.broadcastUserStatus(user_id, 'online');
-    }
-
-    
-    
-
-    async broadcastUserStatus(user_id, status) {
-
-        this.io.emit('user_status_changed', {
-            user_id,
-            status
-        });
-    }
-
-
-    async broadcast(event, data) {
-        if (this.io) {
-            this.io.emit(event, data);
-        } else {
-            console.warn('Socket.IO not initialized. Cannot broadcast:', event);
-        }
-    }
-
-    async setupSocketEvents(socket) {
+    async setupSessionEvents(socket) {
         const { user_id, name } = socket.user;
 
-
-        socket.on('disconnect', async () => {
-            console.log(`🔌 User disconnected: ${name} (${socket.id})`);
-            this.broadcastUserStatus(user_id, 'offline');
-        });
-
-        socket.on('code_change',async(currCode)=>{
-            console.log(`currcode: ${currCode}`);
-            
-            this.io.emit('listen-code-change',currCode)
-        });
-
+        // --- 1. HOST: Create Session ---
         socket.on('create_session', async () => {
-            const { user_id } = socket.user;
-            const sessionId = uuidv4(); 
+            const sessionId = uuidv4();
+            // Create session entry
             await createSession(user_id, sessionId);
-            console.log(`Created a new Session with id=${sessionId}`);
-            this.io.emit('session_created',sessionId);
+            // Initialize Host Code
+            await db.execute('INSERT INTO codes(session_id, user_id, code, code_lang) VALUES(?,?,?,?)',
+                [sessionId, user_id, '// Session Started', 'javascript']);
+
+            // Add Host to participants
+            await joinSession(user_id, sessionId, 'host');
+
+            socket.emit('session_created', sessionId);
         });
 
-        socket.on('join_session',async(session_id)=>{
-            const { user_id } = socket.user;
-            await joinSession(user_id,session_id)
-            this.io.emit('user_joined_session',`${socket.user.email} [${socket.user.name}] joined session!`)
-        })
+        // --- 2. COMMON: Join Session ---
+        // inside socketManager.js -> setupSessionEvents
 
-        
+        socket.on('join_session', async ({ session_id }) => {
+            socket.join(session_id);
 
+            // 1. Determine Role
+            const [sessionData] = await db.execute('SELECT host_id FROM session WHERE session_id = ?', [session_id]);
+            const role = (sessionData[0] && sessionData[0].host_id === user_id) ? 'host' : 'student';
+
+            // 2. Add to participants
+            await joinSession(user_id, session_id, role);
+
+            // 3. Fetch Initial State
+
+            // A. Get Host's Code (Public View)
+            const [hostCodeRows] = await db.execute(
+                'SELECT code, code_lang FROM codes WHERE session_id=? AND user_id=(SELECT host_id FROM session WHERE session_id=?)',
+                [session_id, session_id]
+            );
+
+            // B. Get THIS User's Personal Code (Private View) --- [NEW STEP]
+            const [myCodeRows] = await db.execute(
+                'SELECT code FROM codes WHERE session_id=? AND user_id=?',
+                [session_id, user_id]
+            );
+
+            // C. Get Participants & Chat (Existing logic...)
+            const [users] = await db.execute(`
+        SELECT u.user_id as id, u.name, sp.role 
+        FROM session_participant sp 
+        JOIN user u ON sp.user_id = u.user_id 
+        WHERE sp.session_id = ?`, [session_id]);
+
+            const [chat] = await db.execute(`
+        SELECT m.message, m.created_at as timestamp, u.name as sender 
+        FROM messages m 
+        JOIN user u ON m.user_id = u.user_id 
+        WHERE m.session_id = ? ORDER BY m.created_at ASC`, [session_id]);
+
+            // 4. Emit State to THIS user
+            socket.emit('session_state', {
+                code: hostCodeRows[0]?.code || '// Host has not started yet...', // Host's code
+                language: hostCodeRows[0]?.code_lang || 'javascript',
+                users: users,
+                chat: chat,
+                // Send the user's own code back to them
+                userCode: myCodeRows[0]?.code || '// Write your solution here...' // [NEW FIELD]
+            });
+
+            // Notify OTHERS
+            socket.to(session_id).emit('joinee_joined', { id: user_id, name: name, role: role });
+        });
+
+        // --- 3. HOST: Code Change (Broadcasts to everyone) ---
+        socket.on('host_code_change', async ({ session_id, new_code }) => {
+            // Update DB so new joiners get latest code
+            await db.execute('UPDATE codes SET code=? WHERE session_id=? AND user_id=?', [new_code, session_id, user_id]);
+            // Broadcast to room (excluding sender)
+            socket.to(session_id).emit('host_code_update', new_code);
+        });
+
+        // --- 4. HOST: Language Change ---
+        socket.on('host_language_change', async ({ session_id, language }) => {
+            await db.execute('UPDATE codes SET code_lang=? WHERE session_id=? AND user_id=?', [language, session_id, user_id]);
+            socket.to(session_id).emit('language_change', language);
+        });
+
+        // --- 5. JOINEE: Code Change (Sent to Host Monitor) ---
+        socket.on('joinee_code_change', async ({ session_id, code }) => {
+            // Update Joinee's specific code in DB
+            // Upsert logic (Insert if not exists, update if exists)
+            const [existing] = await db.execute('SELECT * FROM codes WHERE session_id=? AND user_id=?', [session_id, user_id]);
+            if (existing.length > 0) {
+                await db.execute('UPDATE codes SET code=? WHERE session_id=? AND user_id=?', [code, session_id, user_id]);
+            } else {
+                await db.execute('INSERT INTO codes(session_id, user_id, code, code_lang) VALUES(?,?,?,?)', [session_id, user_id, code, 'javascript']);
+            }
+
+            // Emit ONLY to Host (Assuming we store host socket id, or just broadcast to room and frontend filters)
+            // Easier approach: Broadcast to room, Frontend logic filters it out if not Host
+            socket.to(session_id).emit('joinee_code_update', { joineeId: user_id, code: code });
+        });
+
+        // --- 6. COMMON: Chat ---
+        socket.on('send_message', async ({ session_id, message }) => {
+            await db.execute('INSERT INTO messages(session_id, user_id, message) VALUES(?,?,?)', [session_id, user_id, message]);
+            const msgPayload = { message, sender: name, timestamp: new Date() };
+            socket.to(session_id).emit('chat_message', msgPayload);
+        });
+
+        // --- 7. HOST: End Session ---
+        socket.on('end_session', async ({ session_id }) => {
+            await db.execute('UPDATE session SET is_ended=true WHERE session_id=?', [session_id]);
+            this.io.to(session_id).emit('session_ended');
+            this.io.in(session_id).disconnectSockets(); // Force disconnect everyone
+        });
+
+        // Inside setupSessionEvents (Host Methods)
+
+        socket.on('kick_user', async ({ session_id, user_id_to_kick }) => {
+            // Optional: Check if requestor is actually the host
+
+            // 1. Remove from DB (participants table)
+            await db.execute(
+                'DELETE FROM session_participant WHERE session_id=? AND user_id=?',
+                [session_id, user_id_to_kick]
+            );
+
+            // 2. Get the socket ID of the user to kick
+            const [userRows] = await db.execute(
+                'SELECT socket_id FROM user WHERE user_id=?',
+                [user_id_to_kick]
+            );
+
+            if (userRows.length > 0 && userRows[0].socket_id) {
+                // 3. Emit 'kicked' event specifically to that user
+                this.io.to(userRows[0].socket_id).emit('kicked');
+
+                // 4. Force disconnect the socket
+                // this.io.sockets.sockets.get(userRows[0].socket_id)?.disconnect();
+            }
+
+            // 5. Notify everyone else that they left
+            this.io.to(session_id).emit('joinee_left', user_id_to_kick);
+        });
     }
 }
 

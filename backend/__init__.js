@@ -11,33 +11,64 @@ USE codemint;
 CREATE TABLE IF NOT EXISTS user (
     user_id INT PRIMARY KEY AUTO_INCREMENT,
     name VARCHAR(50) NOT NULL,
-    phone VARCHAR(11) NOT NULL UNIQUE,
-    email varchar(50) NOT NULL UNIQUE,
+    phone VARCHAR(15) UNIQUE, 
+    email VARCHAR(100) NOT NULL UNIQUE,
     password VARCHAR(255) NOT NULL,
-    refreshToken VARCHAR(255),
-    socket_id VARCHAR(50)
+    refreshToken VARCHAR(500),
+    socket_id VARCHAR(100),
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
+
 -- ========================================
 -- Sessions table
 -- ========================================
-create table if not exists session (
-session_id varchar(50) primary key ,
-host_user_id int,
-foreign key(host_user_id)references user(user_id) on delete cascade,
-created_at datetime default now(),
-is_ended bool default false
+CREATE TABLE IF NOT EXISTS session (
+    session_id VARCHAR(50) PRIMARY KEY,
+    host_id INT NOT NULL, -- Renamed to match backend logic easier
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    is_ended BOOLEAN DEFAULT FALSE,
+    FOREIGN KEY (host_id) REFERENCES user(user_id) ON DELETE CASCADE
 );
+
 -- ========================================
 -- Session Participant table
 -- ========================================
-create table if not exists session_participant(
-session_id varchar(50),
-user_id int,
-foreign key(session_id) references session(session_id) on delete cascade,
-foreign key(user_id) references user(user_id) on delete cascade,
-primary key(session_id,user_id)
+CREATE TABLE IF NOT EXISTS session_participant (
+    session_id VARCHAR(50),
+    user_id INT,
+    role ENUM('host', 'student', 'viewer') DEFAULT 'student', -- REQUIRED for your backend logic
+    joined_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (session_id, user_id),
+    FOREIGN KEY (session_id) REFERENCES session(session_id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES user(user_id) ON DELETE CASCADE
 );
 
+-- ========================================
+-- Codes (Snapshots of user code)
+-- ========================================
+CREATE TABLE IF NOT EXISTS codes (
+    session_id VARCHAR(50),
+    user_id INT,
+    code MEDIUMTEXT, -- VARCHAR(10000) is too small. MEDIUMTEXT holds ~16MB.
+    code_lang VARCHAR(20) DEFAULT 'javascript',
+    last_updated DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (session_id, user_id),
+    FOREIGN KEY (session_id) REFERENCES session(session_id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES user(user_id) ON DELETE CASCADE
+);
+
+-- ========================================
+-- Chat Messages (MISSING IN YOURS)
+-- ========================================
+CREATE TABLE IF NOT EXISTS messages (
+    message_id INT PRIMARY KEY AUTO_INCREMENT,
+    session_id VARCHAR(50),
+    user_id INT,
+    message TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (session_id) REFERENCES session(session_id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES user(user_id) ON DELETE CASCADE
+);
 `;
 
 export { init_query };

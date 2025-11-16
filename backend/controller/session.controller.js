@@ -10,7 +10,7 @@ const createSession=
             if(!user_id) throw new ApiError(400,`No user_id provided by SocketManager to create session!`)
             if(!session_id) throw new ApiError(400,`No session_id provided by SocketManager to create session!`)
 
-            const query='insert into session (session_id,host_user_id) values(?,?)'
+            const query='insert into session (session_id,host_id) values(?,?)'
             const [rows]=await db.execute(query,[session_id,user_id])
             if(rows.length===0) throw new ApiError(400,"Unabe to create session!")
                 
