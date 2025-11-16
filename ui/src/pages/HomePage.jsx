@@ -47,7 +47,7 @@ const HomePage = () => {
     e.preventDefault();
     if (joinSessionId.trim()) {
       // Students/Participants go to the regular editor view
-      navigate(`/editor/${joinSessionId}`);
+      navigate(`/joinView/${joinSessionId}`);
     }
   };
 

@@ -13,6 +13,7 @@ import RegisterPage from './pages/RegisterPage';
 import CodeEditor from './pages/CodeEditor'; // Ensure this path matches where you saved CodeEditor
 import TempEditor from './pages/TempEditor';
 import HostView from './pages/HostView';
+import JoinView from './pages/JoineeView';
 
 function App() {
   const { user, isLoading } = useAuth();
@@ -42,8 +43,9 @@ function App() {
         </Route>
 
        <Route path="/editor" element={<TempEditor />} />
-       <Route path="/hostView/:sessionId" element={<HostView />} />
-
+       <Route path="/hostView/:session_id" element={<HostView />} />
+       <Route path="/joinView/:session_id" element={<JoinView />} />
+        
       </Routes>
     </Router>
   );
