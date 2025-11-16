@@ -47,8 +47,31 @@ class SocketManager {
             await this.setupSessionEvents(socket);
             await db.execute('UPDATE user SET socket_id=? WHERE user_id=?', [socket.id, socket.user.user_id]);
 
-            socket.on('disconnect', () => {
-                console.log(`🔌 User disconnected: ${socket.user.name}`);
+            // ... inside setupSessionEvents
+            socket.on('disconnect', async () => {
+                console.log(`🔌 User disconnected: ${socket.user.name} (${socket.id})`);
+
+                const { user_id } = socket.user;
+                // Get the session_id we stored during the join
+                const session_id = socket.current_session_id;
+
+                if (session_id) {
+                    try {
+                        // 1. Remove the user from the session_participant table
+                        await db.execute(
+                            'DELETE FROM session_participant WHERE session_id=? AND user_id=?',
+                            [session_id, user_id]
+                        );
+
+                        // 2. Notify the Host (and all others in the room) that this user left
+                        this.io.to(session_id).emit('joinee_left', user_id);
+
+                        console.log(`User ${user_id} removed from session ${session_id}`);
+
+                    } catch (err) {
+                        console.error("Error handling disconnect: ", err);
+                    }
+                }
             });
         });
     }
@@ -76,6 +99,10 @@ class SocketManager {
 
         socket.on('join_session', async ({ session_id }) => {
             socket.join(session_id);
+
+            // --- ADD THIS LINE ---
+            // Store session_id on the socket for cleanup during disconnect
+            socket.current_session_id = session_id;
 
             // 1. Determine Role
             const [sessionData] = await db.execute('SELECT host_id FROM session WHERE session_id = ?', [session_id]);

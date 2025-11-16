@@ -101,7 +101,7 @@ const HostView = () => {
     };
 
     const copyInviteLink = () => {
-        const link = `${window.location.origin}/join/${session_id}`;
+        const link = `${window.location.origin}/joinView/${session_id}`;
         navigator.clipboard.writeText(link);
         alert("Invite link copied to clipboard!");
     };

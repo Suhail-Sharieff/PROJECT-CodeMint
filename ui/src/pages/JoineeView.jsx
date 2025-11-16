@@ -93,6 +93,9 @@ const JoinView = () => {
 
     const handleLeaveSession = () => {
         if (window.confirm("Are you sure you want to leave?")) {
+            if (socket) {
+                socket.disconnect();
+            }
             navigate('/');
         }
     };
