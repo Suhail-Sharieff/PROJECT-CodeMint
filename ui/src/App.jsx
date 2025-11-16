@@ -12,6 +12,7 @@ import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
 import CodeEditor from './pages/CodeEditor'; // Ensure this path matches where you saved CodeEditor
 import TempEditor from './pages/TempEditor';
+import HostView from './pages/HostView';
 
 function App() {
   const { user, isLoading } = useAuth();
@@ -41,6 +42,7 @@ function App() {
         </Route>
 
        <Route path="/editor" element={<TempEditor />} />
+       <Route path="/hostView/:sessionId" element={<HostView />} />
 
       </Routes>
     </Router>
