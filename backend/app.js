@@ -62,6 +62,8 @@ app.use(inspector)
 //configuring routes
 import {authRouter} from "./routes/auth.routes.js"
 app.use('/auth',authRouter)
+import { sessionRouter } from "./routes/session.routes.js"
+app.use('/session',sessionRouter)
 
 
 import { ApiError } from "./Utils/Api_Error.utils.js"

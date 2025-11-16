@@ -1,13 +1,15 @@
 import { Server } from "socket.io";
 import jwt from "jsonwebtoken";
 import { db } from "./Utils/sql_connection.js";
+import { createSession, joinSession } from "./controller/session.controller.js";
+import { v4 as uuidv4 } from "uuid";
 
 class SocketManager {
     constructor() {
         this.io = null;
     }
 
-    initialize(server) {
+    async initialize(server) {
         this.io = new Server(server, {
             cors: {
                 origin: process.env.CORS_ORIGIN || "http://localhost:3000", // Default to frontend port for development
@@ -16,13 +18,13 @@ class SocketManager {
             }
         });
 
-        this.setupMiddleware();
-        this.setupEventHandlers();
+        await this.setupMiddleware();
+        await this.setupEventHandlers();
 
         console.log("✅ Socket.IO initialized");
     }
 
-    setupMiddleware() {
+    async setupMiddleware() {
         this.io.use(async (socket, next) => {
             try {
                 console.log('🔍 Socket middleware - Checking authentication...');
@@ -63,11 +65,12 @@ class SocketManager {
         });
     }
 
-    setupEventHandlers() {
-        this.io.on('connection', (socket) => {
+    async setupEventHandlers() {
+        this.io.on('connection', async(socket) => {
             console.log(`🔌 User connected: ${socket.user?.name || 'Unknown'} SOCK_ID=(${socket.id})`);
-            this.handleConnection(socket);
-            this.setupSocketEvents(socket);
+            await this.handleConnection(socket);
+            await this.setupSocketEvents(socket);
+            await db.execute('update user set socket_id=? where user_id=?',[socket.id,socket.user.user_id])
         });
 
         // Handle connection errors
@@ -79,13 +82,13 @@ class SocketManager {
     async handleConnection(socket) {
         const { user_id } = socket.user;
 
-        this.broadcastUserStatus(user_id, 'online');
+        await this.broadcastUserStatus(user_id, 'online');
     }
 
     
     
 
-    broadcastUserStatus(user_id, status) {
+    async broadcastUserStatus(user_id, status) {
 
         this.io.emit('user_status_changed', {
             user_id,
@@ -94,7 +97,7 @@ class SocketManager {
     }
 
 
-    broadcast(event, data) {
+    async broadcast(event, data) {
         if (this.io) {
             this.io.emit(event, data);
         } else {
@@ -102,7 +105,7 @@ class SocketManager {
         }
     }
 
-    setupSocketEvents(socket) {
+    async setupSocketEvents(socket) {
         const { user_id, name } = socket.user;
 
 
@@ -111,12 +114,27 @@ class SocketManager {
             this.broadcastUserStatus(user_id, 'offline');
         });
 
-        socket.on('code-change',async(currCode)=>{
+        socket.on('code_change',async(currCode)=>{
             console.log(`currcode: ${currCode}`);
             
             this.io.emit('listen-code-change',currCode)
+        });
+
+        socket.on('create_session', async () => {
+            const { user_id } = socket.user;
+            const sessionId = uuidv4(); 
+            await createSession(user_id, sessionId);
+            console.log(`Created a new Session with id=${sessionId}`);
+            this.io.emit('session_created',sessionId);
+        });
+
+        socket.on('join_session',async(session_id)=>{
+            const { user_id } = socket.user;
+            await joinSession(user_id,session_id)
+            this.io.emit('user_joined_session',`${socket.user.email} [${socket.user.name}] joined session!`)
         })
 
+        
 
     }
 }
