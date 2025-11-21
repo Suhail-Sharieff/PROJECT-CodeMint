@@ -16,19 +16,27 @@ const HomePage = () => {
   useEffect(() => {
     if (!socket) return;
 
-    // Define the handler
+    // 1. Handler for Live Coding Session
     const handleSessionCreated = (newSessionId) => {
       console.log('Session created with ID:', newSessionId);
-      // Navigate immediately when the server returns the ID
       navigate(`/hostView/${newSessionId}`);
     };
 
-    // Attach listener
-    socket.on('session_created', handleSessionCreated);
+    // 2. Handler for Test/Assessment (NEW)
+    const handleTestCreated = (newTestId) => {
+      console.log('Test created with ID:', newTestId);
+      // Navigate to the Host Test Dashboard
+      navigate(`/hostTestView/${newTestId}`);
+    };
 
-    // Cleanup listener on unmount
+    // Attach listeners
+    socket.on('session_created', handleSessionCreated);
+    socket.on('test_created', handleTestCreated);
+
+    // Cleanup listeners on unmount
     return () => {
       socket.off('session_created', handleSessionCreated);
+      socket.off('test_created', handleTestCreated);
     };
   }, [socket, navigate]);
 
@@ -39,27 +47,43 @@ const HomePage = () => {
         alert("Socket not connected. Please try again.");
         return;
     }
-    // Emit event, the useEffect above handles the navigation
     socket.emit('create_session');
   };
 
   const handleJoinSession = (e) => {
     e.preventDefault();
     if (joinSessionId.trim()) {
-      // Students/Participants go to the regular editor view
-      navigate(`/joinView/${joinSessionId}`);
+      navigate(`/joinView/${joinSessionId.trim()}`);
     }
   };
 
+  // Updated: Asks for duration before creating test
   const handleCreateTest = () => {
-    const newTestId = "test-" + Math.random().toString(36).substring(7);
-    navigate(`/test-admin/${newTestId}`);
+    if (!socket) {
+      alert("Socket not connected. Please try again.");
+      return;
+    }
+    
+    // Prompt user for duration (default 60 mins)
+    const durationInput = prompt("Enter test duration in minutes:", "60");
+    
+    // If user cancels prompt, do nothing
+    if (durationInput === null) return;
+
+    const duration = parseInt(durationInput);
+    if (isNaN(duration) || duration <= 0) {
+        alert("Please enter a valid duration in minutes.");
+        return;
+    }
+
+    // Send the duration object to the backend
+    socket.emit('create_test', { duration }); 
   };
 
   const handleJoinTest = (e) => {
     e.preventDefault();
     if (joinTestId.trim()) {
-      navigate(`/test-taker/${joinTestId}`);
+      navigate(`/joineeTestView/${joinTestId.trim()}`);
     }
   };
 

@@ -107,8 +107,8 @@ const HostView = () => {
     };
 
     const getMonitoredCode = () => {
-        if (!selectedJoineeId) return '// Select a student from the sidebar to view their code...';
-        return joineeCodes.get(selectedJoineeId) || '// Student has not started typing yet.';
+        if (!selectedJoineeId) return '// Select a joinee from the sidebar to view their code...';
+        return joineeCodes.get(selectedJoineeId) || '// joinee has not started typing yet.';
     };
 
     // --- ADDED ---
@@ -196,7 +196,7 @@ const HostView = () => {
                                 </div>
                                 <div className="flex-1 overflow-y-auto p-2 space-y-1">
                                     {users.filter(p => p.role !== 'host').length === 0 && (
-                                        <p className="text-xs text-gray-500 text-center mt-10">Waiting for students to join...</p>
+                                        <p className="text-xs text-gray-500 text-center mt-10">Waiting for joinees to join...</p>
                                     )}
                                     
                                     {users.filter(p => p.role !== 'host').map(p => (

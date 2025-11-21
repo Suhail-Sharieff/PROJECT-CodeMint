@@ -14,6 +14,9 @@ import CodeEditor from './pages/CodeEditor'; // Ensure this path matches where y
 import TempEditor from './pages/TempEditor';
 import HostView from './pages/HostView';
 import JoinView from './pages/JoineeView';
+import SoloEditor from './components/SoloEditor';
+import HostTestView from './pages/HostTestView';
+import JoineeTestView from './pages/JoineeTestView';
 
 function App() {
   const { user, isLoading } = useAuth();
@@ -42,9 +45,12 @@ function App() {
           />
         </Route>
 
-       <Route path="/editor" element={<TempEditor />} />
+       <Route path="/editor" element={<SoloEditor/>} />
        <Route path="/hostView/:session_id" element={<HostView />} />
        <Route path="/joinView/:session_id" element={<JoinView />} />
+       <Route path="/hostTestView/:test_id" element={<HostTestView />} />
+          <Route path="/joineeTestView/:test_id" element={<JoineeTestView />} />
+          
         
       </Routes>
     </Router>

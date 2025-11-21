@@ -183,7 +183,7 @@ const JoinView = () => {
                                 <CodeEditor
                                     value={hostCode}
                                     language={language}
-                                    readOnly={true} // Vital: Students cannot edit Host code
+                                    readOnly={true} // Vital: joinees cannot edit Host code
                                 />
                             </div>
                         </div>

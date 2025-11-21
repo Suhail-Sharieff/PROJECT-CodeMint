@@ -3,6 +3,7 @@ import jwt from "jsonwebtoken";
 import { db } from "./Utils/sql_connection.js";
 import { createSession, joinSession } from "./controller/session.controller.js";
 import { v4 as uuidv4 } from "uuid";
+import { createTest, joinTest } from "./controller/test.controller.js";
 
 class SocketManager {
     constructor() {
@@ -46,7 +47,7 @@ class SocketManager {
             console.log(`🔌 User connected: ${socket.user.name} (${socket.id})`);
             await this.setupSessionEvents(socket);
             await db.execute('UPDATE user SET socket_id=? WHERE user_id=?', [socket.id, socket.user.user_id]);
-
+            await this.setupTestEvents(socket);
             // ... inside setupSessionEvents
             socket.on('disconnect', async () => {
                 console.log(`🔌 User disconnected: ${socket.user.name} (${socket.id})`);
@@ -85,7 +86,7 @@ class SocketManager {
             // Create session entry
             await createSession(user_id, sessionId);
             // Initialize Host Code
-            await db.execute('INSERT INTO codes(session_id, user_id, code, code_lang) VALUES(?,?,?,?)',
+            await db.execute('INSERT INTO session_codes(session_id, user_id, code, code_lang) VALUES(?,?,?,?)',
                 [sessionId, user_id, '// Session Started', 'javascript']);
 
             // Add Host to participants
@@ -106,7 +107,7 @@ class SocketManager {
 
             // 1. Determine Role
             const [sessionData] = await db.execute('SELECT host_id FROM session WHERE session_id = ?', [session_id]);
-            const role = (sessionData[0] && sessionData[0].host_id === user_id) ? 'host' : 'student';
+            const role = (sessionData[0] && sessionData[0].host_id === user_id) ? 'host' : 'joinee';
 
             // 2. Add to participants
             await joinSession(user_id, session_id, role);
@@ -115,13 +116,13 @@ class SocketManager {
 
             // A. Get Host's Code (Public View)
             const [hostCodeRows] = await db.execute(
-                'SELECT code, code_lang FROM codes WHERE session_id=? AND user_id=(SELECT host_id FROM session WHERE session_id=?)',
+                'SELECT code, code_lang FROM session_codes WHERE session_id=? AND user_id=(SELECT host_id FROM session WHERE session_id=?)',
                 [session_id, session_id]
             );
 
             // B. Get THIS User's Personal Code (Private View) --- [NEW STEP]
             const [myCodeRows] = await db.execute(
-                'SELECT code FROM codes WHERE session_id=? AND user_id=?',
+                'SELECT code FROM session_codes WHERE session_id=? AND user_id=?',
                 [session_id, user_id]
             );
 
@@ -155,14 +156,14 @@ class SocketManager {
         // --- 3. HOST: Code Change (Broadcasts to everyone) ---
         socket.on('host_code_change', async ({ session_id, new_code }) => {
             // Update DB so new joiners get latest code
-            await db.execute('UPDATE codes SET code=? WHERE session_id=? AND user_id=?', [new_code, session_id, user_id]);
+            await db.execute('UPDATE session_codes SET code=? WHERE session_id=? AND user_id=?', [new_code, session_id, user_id]);
             // Broadcast to room (excluding sender)
             socket.to(session_id).emit('host_code_update', new_code);
         });
 
         // --- 4. HOST: Language Change ---
         socket.on('host_language_change', async ({ session_id, language }) => {
-            await db.execute('UPDATE codes SET code_lang=? WHERE session_id=? AND user_id=?', [language, session_id, user_id]);
+            await db.execute('UPDATE session_codes SET code_lang=? WHERE session_id=? AND user_id=?', [language, session_id, user_id]);
             socket.to(session_id).emit('language_change', language);
         });
 
@@ -170,11 +171,11 @@ class SocketManager {
         socket.on('joinee_code_change', async ({ session_id, code }) => {
             // Update Joinee's specific code in DB
             // Upsert logic (Insert if not exists, update if exists)
-            const [existing] = await db.execute('SELECT * FROM codes WHERE session_id=? AND user_id=?', [session_id, user_id]);
+            const [existing] = await db.execute('SELECT * FROM session_codes WHERE session_id=? AND user_id=?', [session_id, user_id]);
             if (existing.length > 0) {
-                await db.execute('UPDATE codes SET code=? WHERE session_id=? AND user_id=?', [code, session_id, user_id]);
+                await db.execute('UPDATE session_codes SET code=? WHERE session_id=? AND user_id=?', [code, session_id, user_id]);
             } else {
-                await db.execute('INSERT INTO codes(session_id, user_id, code, code_lang) VALUES(?,?,?,?)', [session_id, user_id, code, 'javascript']);
+                await db.execute('INSERT INTO session_codes(session_id, user_id, code, code_lang) VALUES(?,?,?,?)', [session_id, user_id, code, 'javascript']);
             }
 
             // Emit ONLY to Host (Assuming we store host socket id, or just broadcast to room and frontend filters)
@@ -191,9 +192,23 @@ class SocketManager {
 
         // --- 7. HOST: End Session ---
         socket.on('end_session', async ({ session_id }) => {
+            // 1. Mark session as ended in DB
             await db.execute('UPDATE session SET is_ended=true WHERE session_id=?', [session_id]);
+
+            // 2. Broadcast to everyone that session ended
             this.io.to(session_id).emit('session_ended');
-            this.io.in(session_id).disconnectSockets(); // Force disconnect everyone
+
+            // 3. Clean up the socket room
+            // Ideally, we make all sockets leave the room so they don't receive old events
+            const socketsInRoom = await this.io.in(session_id).fetchSockets();
+
+            for (const s of socketsInRoom) {
+                s.leave(session_id);
+                // CLEAR the session ID so they are "free"
+                s.current_session_id = null;
+            }
+
+            console.log(`Session ${session_id} ended and room cleared.`);
         });
 
         // Inside setupSessionEvents (Host Methods)
@@ -223,6 +238,158 @@ class SocketManager {
 
             // 5. Notify everyone else that they left
             this.io.to(session_id).emit('joinee_left', user_id_to_kick);
+        });
+    }
+
+
+    async setupTestEvents(socket) {
+        const { user_id, name } = socket.user;
+        socket.on('kick_test_user', async ({ test_id, user_id_to_kick }) => {
+            const { user_id } = socket.user;
+            // Verify Host
+            const [check] = await db.execute('SELECT host_id FROM test WHERE test_id=?', [test_id]);
+            if (check[0].host_id !== user_id) return;
+
+            await db.execute('DELETE FROM test_participant WHERE test_id=? AND user_id=?', [test_id, user_id_to_kick]);
+
+            // Find socket and force kick
+            const [u] = await db.execute('SELECT socket_id FROM user WHERE user_id=?', [user_id_to_kick]);
+            if (u.length > 0 && u[0].socket_id) {
+                this.io.to(u[0].socket_id).emit('kicked');
+            }
+            this.io.to(test_id).emit('joinee_left', user_id_to_kick);
+        });
+        // --- 1. Create & Join Logic ---
+        socket.on('create_test', async ({ duration }) => {
+            const test_id = uuidv4();
+            // Default to 60 if not provided, ensure it is INT
+            const finalDuration = parseInt(duration) || 60;
+
+            await createTest(user_id, test_id, finalDuration);
+            await joinTest(user_id, test_id);
+
+            socket.emit('test_created', test_id);
+        });
+
+        socket.on('join_test', async ({ test_id }) => {
+            try {
+                socket.join(test_id);
+                socket.current_test_id = test_id;
+                const { user_id, name } = socket.user;
+
+                // Check Test Metadata
+                const [testRows] = await db.execute('SELECT host_id, status, start_time, duration FROM test WHERE test_id = ?', [test_id]);
+                if (testRows.length === 0) return socket.emit('error', { message: "Test not found" });
+
+                const testMeta = testRows[0];
+                const role = (testMeta.host_id === user_id) ? 'host' : 'joinee';
+
+                // BLOCK RE-ENTRY if finished
+                if (role === 'joinee') {
+                    const [pCheck] = await db.execute('SELECT status FROM test_participant WHERE test_id=? AND user_id=?', [test_id, user_id]);
+                    if (pCheck.length > 0 && pCheck[0].status === 'finished') {
+                        socket.emit('error', { message: "You have already submitted this test." });
+                        return; // Stop execution
+                    }
+                }
+
+                // Add/Update Participant
+                await db.execute(
+                    `INSERT INTO test_participant (test_id, user_id, role) VALUES (?, ?, ?) 
+             ON DUPLICATE KEY UPDATE joined_at=NOW()`,
+                    [test_id, user_id, role]
+                );
+
+                // Fetch Questions
+                const [questions] = await db.execute('SELECT * FROM question WHERE test_id = ?', [test_id]);
+
+                // SECURE TEST CASE FETCHING
+                let testCases = [];
+                if (questions.length > 0) {
+                    const qIds = questions.map(q => q.question_id);
+                    let query = `SELECT * FROM testcase WHERE question_id IN (${qIds.join(',')})`;
+
+                    // CRITICAL: Joinees NEVER get hidden cases in the initial payload
+                    if (role === 'joinee') {
+                        query += ` AND is_hidden = FALSE`;
+                    }
+                    const [cases] = await db.execute(query);
+                    testCases = cases;
+                }
+
+                // Fetch Saved Code & Participants (Existing logic...)
+                const [savedCode] = await db.execute('SELECT question_id, code, language FROM test_submissions WHERE test_id=? AND user_id=?', [test_id, user_id]);
+                const [users] = await db.execute('SELECT u.user_id as id, u.name, tp.role, tp.status FROM test_participant tp JOIN user u ON tp.user_id = u.user_id WHERE tp.test_id = ?', [test_id]);
+
+                // Emit State
+                socket.emit('test_state', {
+                    testId: test_id,
+                    status: testMeta.status,
+                    role,
+                    questions,
+                    testCases, // Contains ONLY visible cases for joinees
+                    savedCode,
+                    users
+                });
+
+                if (role === 'joinee') {
+                    socket.to(test_id).emit('test_participant_joined', { id: user_id, name, role, status: 'active' });
+                }
+
+            } catch (err) {
+                console.error(err);
+                socket.emit('error', { message: err.message });
+            }
+        });
+        // --- 2. Host Management Events ---
+        socket.on('add_question', async ({ test_id, title, description, example }) => {
+            const [res] = await db.execute(
+                'INSERT INTO question (test_id, title, description, example) VALUES (?,?,?,?)',
+                [test_id, title, description, example]
+            );
+            const question_id = res.insertId;
+            // Broadcast Update
+            this.io.to(test_id).emit('question_added', { question_id, test_id, title, description, example });
+        });
+
+        socket.on('add_testcase', async ({ question_id, stdin, expected_output, is_hidden }) => {
+            await db.execute(
+                'INSERT INTO testcase (question_id, stdin, expected_output, is_hidden) VALUES (?,?,?,?)',
+                [question_id, stdin, expected_output, is_hidden]
+            );
+            // Only send to Host? Or send "Hidden Case Added" to students?
+            // Simpler: Just refresh state for everyone, filtering hidden logic in join/refresh.
+        });
+
+        socket.on('start_test', async ({ test_id }) => {
+            await db.execute('UPDATE test SET status="LIVE", start_time=NOW() WHERE test_id=?', [test_id]);
+            const [rows] = await db.execute('SELECT duration FROM test WHERE test_id=?', [test_id]);
+            this.io.to(test_id).emit('test_started', { duration: rows[0].duration * 60 });
+        });
+
+        socket.on('submit_test', async ({ test_id }) => {
+            await db.execute('UPDATE test_participant SET status="finished" WHERE test_id=? AND user_id=?', [test_id, user_id]);
+            socket.emit('test_submitted'); // Confirm to user
+            socket.to(test_id).emit('participant_finished', { userId: user_id }); // Notify Host
+            socket.disconnect(); // Kick them out
+        });
+        // --- 3. Joinee Events ---
+        socket.on('save_code', async ({ test_id, question_id, code, language }) => {
+            // Save to DB
+            await db.execute(`
+        INSERT INTO test_submissions (test_id, question_id, user_id, code, language)
+        VALUES (?, ?, ?, ?, ?)
+        ON DUPLICATE KEY UPDATE code=?, language=?, last_updated=NOW()
+    `, [test_id, question_id, user_id, code, language, code, language]);
+
+            // Broadcast to Host so they can see it LIVE
+            // We emit to the room; Host frontend will filter for the selected student
+            socket.to(test_id).emit('participant_code_update', {
+                userId: user_id,
+                questionId: question_id,
+                code,
+                language
+            });
         });
     }
 }

@@ -36,7 +36,7 @@ CREATE TABLE IF NOT EXISTS session (
 CREATE TABLE IF NOT EXISTS session_participant (
     session_id VARCHAR(50),
     user_id INT,
-    role ENUM('host', 'student', 'viewer') DEFAULT 'student', -- REQUIRED for your backend logic
+    role ENUM('host', 'joinee', 'viewer') DEFAULT 'joinee', -- REQUIRED for your backend logic
     joined_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (session_id, user_id),
     FOREIGN KEY (session_id) REFERENCES session(session_id) ON DELETE CASCADE,
@@ -44,9 +44,9 @@ CREATE TABLE IF NOT EXISTS session_participant (
 );
 
 -- ========================================
--- Codes (Snapshots of user code)
+-- Session_Codes (Snapshots of user code)
 -- ========================================
-CREATE TABLE IF NOT EXISTS codes (
+CREATE TABLE IF NOT EXISTS session_codes (
     session_id VARCHAR(50),
     user_id INT,
     code MEDIUMTEXT, -- VARCHAR(10000) is too small. MEDIUMTEXT holds ~16MB.
@@ -69,6 +69,78 @@ CREATE TABLE IF NOT EXISTS messages (
     FOREIGN KEY (session_id) REFERENCES session(session_id) ON DELETE CASCADE,
     FOREIGN KEY (user_id) REFERENCES user(user_id) ON DELETE CASCADE
 );
+
+-- ========================================
+-- Test
+-- ========================================
+
+CREATE TABLE IF NOT EXISTS test(
+    test_id VARCHAR(50) PRIMARY KEY,
+    host_id INT,
+    title VARCHAR(100) DEFAULT 'Untitled Test',
+    status ENUM('DRAFT', 'LIVE', 'ENDED') DEFAULT 'DRAFT',
+    created_at DATETIME DEFAULT NOW(),
+    duration INT DEFAULT 60, -- Duration in minutes
+    start_time DATETIME, 
+    FOREIGN KEY(host_id) REFERENCES user(user_id) ON DELETE CASCADE
+);
+
+-- ========================================
+-- Question (Linked to Test)
+-- ========================================
+CREATE TABLE IF NOT EXISTS question(
+    question_id INT PRIMARY KEY AUTO_INCREMENT,
+    test_id VARCHAR(50),
+    title VARCHAR(100),
+    description TEXT,
+    example TEXT,
+    FOREIGN KEY(test_id) REFERENCES test(test_id) ON DELETE CASCADE
+);
+
+-- ========================================
+-- Test Cases (With Hidden Flag)
+-- ========================================
+CREATE TABLE IF NOT EXISTS testcase(
+    case_id INT PRIMARY KEY AUTO_INCREMENT,
+    question_id INT,
+    stdin TEXT,
+    expected_output TEXT,
+    is_hidden BOOLEAN DEFAULT FALSE,
+    FOREIGN KEY(question_id) REFERENCES question(question_id) ON DELETE CASCADE
+);
+
+-- ========================================
+-- Test Participant (Joinees)
+-- ========================================
+CREATE TABLE IF NOT EXISTS test_participant (
+    test_id VARCHAR(50),
+    user_id INT,
+    role ENUM('host', 'joinee') DEFAULT 'joinee',
+    status ENUM('active', 'finished') DEFAULT 'active', -- NEW COLUMN
+    joined_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    score INT DEFAULT 0,
+    PRIMARY KEY (test_id, user_id),
+    FOREIGN KEY (test_id) REFERENCES test(test_id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES user(user_id) ON DELETE CASCADE
+);
+
+
+-- ========================================
+-- Test Submissions (Persist Code State)
+-- ========================================
+CREATE TABLE IF NOT EXISTS test_submissions (
+    test_id VARCHAR(50),
+    question_id INT,
+    user_id INT,
+    code MEDIUMTEXT,
+    language VARCHAR(50) DEFAULT 'javascript',
+    last_updated DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (test_id, question_id, user_id),
+    FOREIGN KEY (test_id) REFERENCES test(test_id) ON DELETE CASCADE,
+    FOREIGN KEY (question_id) REFERENCES question(question_id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES user(user_id) ON DELETE CASCADE
+);
+
 `;
 
 export { init_query };

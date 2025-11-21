@@ -25,9 +25,7 @@ const Navbar = () => {
 
         {/* Desktop Links */}
         <div className="hidden md:flex items-center space-x-8">
-          <Link to="/features" className="text-sm font-medium text-gray-400 hover:text-emerald-400 transition-colors">Features</Link>
-          <Link to="/pricing" className="text-sm font-medium text-gray-400 hover:text-emerald-400 transition-colors">Pricing</Link>
-          <Link to="/docs" className="text-sm font-medium text-gray-400 hover:text-emerald-400 transition-colors">Docs</Link>
+          <Link to="/editor" className="text-sm font-medium text-gray-400 hover:text-emerald-400 transition-colors">Coding Playground</Link>
         </div>
 
         {/* Auth Buttons */}

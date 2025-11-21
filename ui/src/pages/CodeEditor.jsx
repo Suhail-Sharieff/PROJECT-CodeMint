@@ -23,6 +23,7 @@ const CodeEditor = ({
   onChange,
   onLanguageChange,
   readOnly = false,
+  initialTestCases
 }) => {
   // --- State ---
   const [activeTab, setActiveTab] = useState('testcase'); 
@@ -77,7 +78,14 @@ const CodeEditor = ({
         setIsLanguagesLoading(false);
       }
     };
+    
     fetchLanguages();
+
+    // --- FIXED LOGIC: Only update state if initialTestCases EXISTS ---
+    if (initialTestCases && initialTestCases.length > 0) {
+        setTestCases(initialTestCases);
+        setActiveTestCaseId(initialTestCases[0].id); // Ensure first case is active
+    }
   }, [readOnly]); // Run once on mount
 
   // --- Handle Language Change (Updates Template) ---
@@ -92,8 +100,6 @@ const CodeEditor = ({
     const template = BOILERPLATES[simpleKey] || BOILERPLATES.plaintext;
     
     if (onChange) {
-        // Optional: Check if user has typed something significant before overwriting?
-        // For now, we behave like LeetCode and overwrite on switch.
         onChange(template);
     }
   };
