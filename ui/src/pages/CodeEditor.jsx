@@ -2,39 +2,53 @@ import React, { useState, useEffect, useRef } from 'react';
 import Editor from '@monaco-editor/react';
 import { 
   Play, CheckCircle, XCircle, AlertTriangle, Loader2, 
-  Terminal, Plus, Trash2, GripHorizontal 
+  Terminal, Plus, Trash2 
 } from 'lucide-react';
 import api from '../services/api';
 
+// --- BOILERPLATE TEMPLATES ---
+const BOILERPLATES = {
+  javascript: `// JavaScript Node.js\n\nconst fs = require('fs');\nconst stdin = fs.readFileSync('/dev/stdin', 'utf-8');\n\nfunction solution(input) {\n    // Your code here\n    console.log("Output from JS");\n}\n\nsolution(stdin);`,
+  python: `# Python 3\nimport sys\n\ndef solution():\n    # Read all input from stdin\n    input_data = sys.stdin.read()\n    # Your code here\n    print("Output from Python")\n\nif __name__ == "__main__":\n    solution()`,
+  java: `// Java\nimport java.util.Scanner;\n\npublic class Main {\n    public static void main(String[] args) {\n        Scanner scanner = new Scanner(System.in);\n        // Your code here\n        System.out.println("Output from Java");\n    }\n}`,
+  cpp: `// C++\n#include <iostream>\n#include <string>\n\nusing namespace std;\n\nint main() {\n    // Your code here\n    string input;\n    cin >> input;\n    cout << "Output from C++" << endl;\n    return 0;\n}`,
+  c: `// C\n#include <stdio.h>\n\nint main() {\n    // Your code here\n    printf("Output from C");\n    return 0;\n}`,
+  go: `// Go\npackage main\nimport "fmt"\n\nfunc main() {\n    fmt.Println("Output from Go")\n}`,
+  plaintext: `// Write your code here...`
+};
+
 const CodeEditor = ({
   value,
-  language,
+  language, 
   onChange,
   onLanguageChange,
   readOnly = false,
 }) => {
   // --- State ---
-  const [activeTab, setActiveTab] = useState('testcase'); // 'testcase' | 'result'
-  
-  // Multiple Test Cases State
-  const [testCases, setTestCases] = useState([
-    { id: 1, input: '', expected: '' },
-    { id: 2, input: '', expected: '' }
-  ]);
+  const [activeTab, setActiveTab] = useState('testcase'); 
+  const [testCases, setTestCases] = useState([{ id: 1, input: '', expected: '' }]);
   const [activeTestCaseId, setActiveTestCaseId] = useState(1);
-
-  // Results State (Array of results corresponding to test cases)
   const [testResults, setTestResults] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
-  
   const [languageList, setLanguageList] = useState([]);
   const [isLanguagesLoading, setIsLanguagesLoading] = useState(false);
-
-  // Panel Resize State
   const [panelHeight, setPanelHeight] = useState(250);
   const [isDragging, setIsDragging] = useState(false);
 
-  // --- Fetch Languages ---
+  // --- HELPER: Normalize Judge0 Name to Simple Key ---
+  const getMonacoLanguage = (judge0Name) => {
+    if (!judge0Name) return 'plaintext';
+    const name = judge0Name.toLowerCase();
+    if (name.includes('javascript') || name.includes('node')) return 'javascript';
+    if (name.includes('python')) return 'python';
+    if (name.includes('java')) return 'java';
+    if (name.includes('c++') || name.includes('cpp')) return 'cpp';
+    if (name.includes('c (')) return 'c';
+    if (name.includes('go')) return 'go';
+    return 'plaintext';
+  };
+
+  // --- Fetch Languages & Set Initial Template ---
   useEffect(() => {
     const fetchLanguages = async () => {
       if (readOnly) return;
@@ -42,9 +56,20 @@ const CodeEditor = ({
       try {
         const response = await api.get(`editor/getLanguages`);
         setLanguageList(response.data);
+        
+        // Set default language AND Template if none selected
         if (!language && response.data.length > 0) {
-            const defaultLang = response.data.find(l => l.name.includes("JavaScript")) || response.data[0];
-            if (onLanguageChange) onLanguageChange(defaultLang.name);
+            const defaultLangObj = response.data.find(l => l.name.includes("JavaScript")) || response.data[0];
+            const defaultName = defaultLangObj.name;
+            
+            // 1. Update Language
+            if (onLanguageChange) onLanguageChange(defaultName);
+            
+            // 2. Update Code Template (Only if editor is empty)
+            if (!value && onChange) {
+                const simpleKey = getMonacoLanguage(defaultName);
+                onChange(BOILERPLATES[simpleKey] || BOILERPLATES.plaintext);
+            }
         }
       } catch (error) {
         console.error("Failed to fetch languages:", error);
@@ -53,7 +78,25 @@ const CodeEditor = ({
       }
     };
     fetchLanguages();
-  }, [readOnly]);
+  }, [readOnly]); // Run once on mount
+
+  // --- Handle Language Change (Updates Template) ---
+  const handleLanguageSelect = (e) => {
+    const newLangName = e.target.value;
+    
+    // 1. Notify Parent of Language Change
+    if (onLanguageChange) onLanguageChange(newLangName);
+
+    // 2. Update Code to Boilerplate
+    const simpleKey = getMonacoLanguage(newLangName);
+    const template = BOILERPLATES[simpleKey] || BOILERPLATES.plaintext;
+    
+    if (onChange) {
+        // Optional: Check if user has typed something significant before overwriting?
+        // For now, we behave like LeetCode and overwrite on switch.
+        onChange(template);
+    }
+  };
 
   // --- Resize Logic ---
   useEffect(() => {
@@ -78,23 +121,7 @@ const CodeEditor = ({
     };
   }, [isDragging]);
 
-  // --- Helpers ---
-  const getMonacoLanguage = (judge0Name) => {
-    if (!judge0Name) return 'plaintext';
-    const name = judge0Name.toLowerCase();
-    if (name.includes('javascript') || name.includes('node')) return 'javascript';
-    if (name.includes('python')) return 'python';
-    if (name.includes('java')) return 'java';
-    if (name.includes('c++') || name.includes('cpp')) return 'cpp';
-    if (name.includes('c (')) return 'c';
-    return 'plaintext';
-  };
-
-  const handleEditorChange = (val) => {
-    if (onChange) onChange(val);
-  };
-
-  // --- Test Case Management ---
+  // --- Helpers for Test Case Logic ---
   const updateTestCase = (field, value) => {
     setTestCases(prev => prev.map(tc => 
       tc.id === activeTestCaseId ? { ...tc, [field]: value } : tc
@@ -109,13 +136,13 @@ const CodeEditor = ({
 
   const removeTestCase = (id, e) => {
     e.stopPropagation();
-    if (testCases.length === 1) return; // Don't delete the last one
+    if (testCases.length === 1) return;
     const newCases = testCases.filter(tc => tc.id !== id);
     setTestCases(newCases);
     if (activeTestCaseId === id) setActiveTestCaseId(newCases[0].id);
   };
 
-  // --- RUN LOGIC (Parallel Execution) ---
+  // --- Run Code Logic ---
   const handleRunCode = async () => {
     setIsLoading(true);
     setActiveTab('result');
@@ -124,9 +151,8 @@ const CodeEditor = ({
 
     try {
       const selectedLangObj = languageList.find(l => l.name === language);
-      const language_id = selectedLangObj ? selectedLangObj.id : 63;
+      const language_id = selectedLangObj ? selectedLangObj.id : 63; 
 
-      // Map each test case to a promise
       const promises = testCases.map(testCase => 
         api.post(`editor/submitCode`, {
           language_id,
@@ -147,7 +173,6 @@ const CodeEditor = ({
         }))
       );
 
-      // Wait for all to finish
       const results = await Promise.all(promises);
       setTestResults(results);
 
@@ -158,7 +183,6 @@ const CodeEditor = ({
     }
   };
 
-  // --- Render Helpers ---
   const getStatusColor = (statusId) => {
     if (statusId === 3) return 'text-emerald-500'; 
     if (statusId === 4) return 'text-red-500';     
@@ -193,8 +217,8 @@ const CodeEditor = ({
               ) : (
                 <select
                     value={language}
-                    onChange={(e) => onLanguageChange && onLanguageChange(e.target.value)}
-                    className="max-w-[200px] px-3 py-1.5 bg-[#0D1117] border border-[#30363D] text-gray-300 text-xs rounded focus:outline-none focus:border-emerald-500 transition-colors"
+                    onChange={handleLanguageSelect} // <--- CHANGED: Uses new handler
+                    className="max-w-[250px] px-3 py-1.5 bg-[#0D1117] border border-[#30363D] text-gray-300 text-xs rounded focus:outline-none focus:border-emerald-500 transition-colors"
                 >
                     {languageList.map((lang) => <option key={lang.id} value={lang.name}>{lang.name}</option>)}
                 </select>
@@ -218,7 +242,7 @@ const CodeEditor = ({
           height="100%"
           language={getMonacoLanguage(language)}
           value={value}
-          onChange={handleEditorChange}
+          onChange={(val) => onChange && onChange(val)}
           theme="vs-dark"
           options={{ minimap: { enabled: false }, fontSize: 14, fontFamily: "'JetBrains Mono', monospace", wordWrap: 'on', readOnly: readOnly, automaticLayout: true, padding: { top: 16, bottom: 16 }, background: '#0D1117' }}
         />
@@ -234,8 +258,6 @@ const CodeEditor = ({
       {/* --- BOTTOM PANEL --- */}
       {!readOnly && (
         <div style={{ height: panelHeight }} className="flex flex-col bg-[#0D1117]">
-          
-          {/* Tabs (Testcase vs Result) */}
           <div className="flex items-center bg-[#161B22] border-b border-[#30363D]">
             <button onClick={() => setActiveTab('testcase')} className={`flex items-center gap-2 px-4 py-2 text-xs font-medium border-r border-[#30363D] relative ${activeTab === 'testcase' ? 'bg-[#0D1117] text-emerald-400' : 'text-gray-400 hover:text-gray-200'}`}>
               {activeTab === 'testcase' && <div className="absolute top-0 left-0 w-full h-0.5 bg-emerald-500" />}
@@ -247,58 +269,36 @@ const CodeEditor = ({
             </button>
           </div>
 
-          {/* Panel Content */}
           <div className="flex-1 flex overflow-hidden">
-            
-            {/* LEFT SIDEBAR: Case Selector */}
-            <div className="w-32 bg-[#161B22] border-r border-[#30363D] flex flex-col p-2 space-y-1 overflow-y-auto">
+            {/* CASE SELECTOR */}
+            <div className="w-36 bg-[#161B22] border-r border-[#30363D] flex flex-col p-2 space-y-1 overflow-y-auto">
                 {testCases.map((tc, idx) => {
                     const result = testResults?.find(r => r.testCaseId === tc.id);
                     const statusColor = result ? getStatusColor(result.status?.id) : 'text-gray-400';
-                    
                     return (
-                        <button
-                            key={tc.id}
-                            onClick={() => setActiveTestCaseId(tc.id)}
-                            className={`flex items-center justify-between px-3 py-2 rounded text-xs text-left group ${activeTestCaseId === tc.id ? 'bg-[#21262d] text-white' : 'text-gray-400 hover:bg-[#21262d]'}`}
-                        >
+                        <button key={tc.id} onClick={() => setActiveTestCaseId(tc.id)} className={`flex items-center justify-between px-3 py-2 rounded text-xs text-left group ${activeTestCaseId === tc.id ? 'bg-[#21262d] text-white' : 'text-gray-400 hover:bg-[#21262d]'}`}>
                             <div className="flex items-center gap-2">
                                 <div className={`w-1.5 h-1.5 rounded-full ${result ? statusColor.replace('text-', 'bg-') : 'bg-gray-500'}`}></div>
                                 Case {idx + 1}
                             </div>
-                            {!readOnly && testCases.length > 1 && (
-                                <Trash2 onClick={(e) => removeTestCase(tc.id, e)} className="w-3 h-3 opacity-0 group-hover:opacity-100 hover:text-red-400" />
-                            )}
+                            {testCases.length > 1 && <Trash2 onClick={(e) => removeTestCase(tc.id, e)} className="w-3 h-3 opacity-0 group-hover:opacity-100 hover:text-red-400" />}
                         </button>
                     )
                 })}
-                <button onClick={addTestCase} className="flex items-center gap-2 px-3 py-2 text-xs text-emerald-400 hover:bg-[#21262d] rounded">
-                    <Plus className="w-3 h-3" /> Add Case
-                </button>
+                <button onClick={addTestCase} className="flex items-center gap-2 px-3 py-2 text-xs text-emerald-400 hover:bg-[#21262d] rounded"><Plus className="w-3 h-3" /> Add Case</button>
             </div>
 
-            {/* RIGHT CONTENT: Inputs/Outputs */}
+            {/* RIGHT CONTENT */}
             <div className="flex-1 p-4 overflow-y-auto custom-scrollbar">
-                
                 {activeTab === 'testcase' && (
                     <div className="space-y-4">
                         <div>
                             <label className="block text-xs font-bold text-gray-500 mb-2 uppercase">Input (Stdin)</label>
-                            <textarea
-                                value={activeInput?.input || ''}
-                                onChange={(e) => updateTestCase('input', e.target.value)}
-                                className="w-full h-24 bg-[#161B22] border border-[#30363D] rounded p-3 text-sm font-mono text-gray-300 focus:border-emerald-500 focus:outline-none resize-none"
-                                placeholder="Enter input..."
-                            />
+                            <textarea value={activeInput?.input || ''} onChange={(e) => updateTestCase('input', e.target.value)} className="w-full h-24 bg-[#161B22] border border-[#30363D] rounded p-3 text-sm font-mono text-gray-300 focus:border-emerald-500 focus:outline-none resize-none" placeholder="Enter input..." />
                         </div>
                         <div>
                             <label className="block text-xs font-bold text-gray-500 mb-2 uppercase">Expected Output</label>
-                            <textarea
-                                value={activeInput?.expected || ''}
-                                onChange={(e) => updateTestCase('expected', e.target.value)}
-                                className="w-full h-24 bg-[#161B22] border border-[#30363D] rounded p-3 text-sm font-mono text-gray-300 focus:border-emerald-500 focus:outline-none resize-none"
-                                placeholder="Enter expected output..."
-                            />
+                            <textarea value={activeInput?.expected || ''} onChange={(e) => updateTestCase('expected', e.target.value)} className="w-full h-24 bg-[#161B22] border border-[#30363D] rounded p-3 text-sm font-mono text-gray-300 focus:border-emerald-500 focus:outline-none resize-none" placeholder="Enter expected output..." />
                         </div>
                     </div>
                 )}
@@ -311,52 +311,29 @@ const CodeEditor = ({
                                 <p>Run code to see results</p>
                             </div>
                         )}
-
-                        {isLoading && (
-                            <div className="h-full flex flex-col items-center justify-center text-gray-400 text-sm">
-                                <Loader2 className="w-8 h-8 mb-2 animate-spin text-emerald-500" />
-                                Running {testCases.length} test cases...
-                            </div>
-                        )}
-
+                        {isLoading && <div className="h-full flex flex-col items-center justify-center text-gray-400 text-sm"><Loader2 className="w-8 h-8 mb-2 animate-spin text-emerald-500" />Running {testCases.length} test cases...</div>}
+                        
                         {testResults && !isLoading && (
                             <div className="space-y-4 animate-in fade-in">
-                                {/* Overall Status Banner */}
                                 <div className={`p-3 rounded border flex items-center gap-3 ${getOverallStatus()?.bg}`}>
                                     {getOverallStatus()?.text === "Accepted" ? <CheckCircle className="w-5 h-5 text-emerald-500"/> : <XCircle className="w-5 h-5 text-red-500"/>}
                                     <h4 className={`font-bold text-sm ${getOverallStatus()?.color}`}>{getOverallStatus()?.text}</h4>
                                 </div>
 
-                                {/* Specific Case Details */}
                                 {activeResult ? (
                                     <div className="space-y-4">
                                         <div className="grid grid-cols-2 gap-4">
-                                            <div>
-                                                <label className="block text-xs font-bold text-gray-500 mb-1">Input</label>
-                                                <div className="bg-[#161B22] border border-[#30363D] p-2 rounded text-sm font-mono text-gray-300">{activeResult.input}</div>
-                                            </div>
-                                            <div>
-                                                <label className="block text-xs font-bold text-gray-500 mb-1">Expected</label>
-                                                <div className="bg-[#161B22] border border-[#30363D] p-2 rounded text-sm font-mono text-gray-300">{activeResult.expected}</div>
-                                            </div>
+                                            <div><label className="block text-xs font-bold text-gray-500 mb-1">Input</label><div className="bg-[#161B22] border border-[#30363D] p-2 rounded text-sm font-mono text-gray-300">{activeResult.input}</div></div>
+                                            <div><label className="block text-xs font-bold text-gray-500 mb-1">Expected</label><div className="bg-[#161B22] border border-[#30363D] p-2 rounded text-sm font-mono text-gray-300">{activeResult.expected}</div></div>
                                         </div>
-                                        
                                         <div>
                                             <label className="block text-xs font-bold text-gray-500 mb-1">Output</label>
                                             <div className={`bg-[#161B22] border p-2 rounded text-sm font-mono ${activeResult.status?.id === 3 ? 'border-emerald-500/50 text-white' : 'border-red-500/50 text-red-200'}`}>
                                                 {activeResult.stdout || activeResult.stderr || activeResult.compile_output || "No output"}
                                             </div>
                                         </div>
-                                        
-                                        {activeResult.stderr && (
-                                            <div className="p-2 bg-red-900/20 border border-red-500/30 rounded text-xs text-red-200 font-mono whitespace-pre-wrap">
-                                                {activeResult.stderr}
-                                            </div>
-                                        )}
                                     </div>
-                                ) : (
-                                    <div className="text-center text-gray-500 text-sm mt-10">Select a test case to view details</div>
-                                )}
+                                ) : <div className="text-center text-gray-500 text-sm mt-10">Select a test case to view details</div>}
                             </div>
                         )}
                     </div>
