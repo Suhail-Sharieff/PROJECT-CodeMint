@@ -14,8 +14,9 @@ const HostTestView = () => {
 
     // --- Core State ---
     const [testState, setTestState] = useState(null);
-    const [viewMode, setViewMode] = useState('questions'); // 'questions' | 'monitor'
+    const [viewMode, setViewMode] = useState('questions');
     const [activeQId, setActiveQId] = useState(null);
+    const [error, setError] = useState(null); // Added Error State
 
     // --- Question Form State ---
     const [newQ, setNewQ] = useState({ title: '', description: '', example: '' });
@@ -28,53 +29,50 @@ const HostTestView = () => {
 
     // --- SOCKET LOGIC ---
     useEffect(() => {
-        // 1. Wait for connection before doing anything
+        // Wait for connection before attempting anything
         if (!socket || !isConnected) return;
 
-        // 2. Define Handlers
-        // 1. Initial State Load
+        console.log("🔌 Connected. Emitting join_test for:", test_id);
+        
+        // Clear any previous errors
+        setError(null);
+
+        // Define Handlers
         const handleTestState = (state) => {
-            console.log("Test State Loaded:", state);
+            console.log("✅ Test State Received:", state);
             setTestState(state);
             
-            // Set Initial Questions
             if(state.questions.length > 0 && !activeQId) setActiveQId(state.questions[0].question_id);
             
-            // Set Initial Participants
-            setParticipants(state.users ? state.users.filter(u => u.role === 'joinee') : []);
+            if (state.users) {
+                setParticipants(state.users.filter(u => u.role === 'joinee'));
+            }
 
-            // --- FIX: Pre-fill Student Code Map from DB ---
+            // --- Populate Code Map ---
             if (state.savedCode && Array.isArray(state.savedCode)) {
                 const initialCodeMap = new Map();
-                
                 state.savedCode.forEach(submission => {
-                    // Now 'submission' definitely has 'user_id' from the backend fix
-                    const userId = submission.user_id;
-                    
-                    // Get existing object for this user or create new
-                    const userCodes = initialCodeMap.get(userId) || {};
-                    
-                    // Map questionID -> Code
-                    userCodes[submission.question_id] = submission.code;
-                    
-                    initialCodeMap.set(userId, userCodes);
+                    const userId = submission.user_id; 
+                    if (userId) {
+                        const userCodes = initialCodeMap.get(userId) || {};
+                        userCodes[submission.question_id] = submission.code;
+                        initialCodeMap.set(userId, userCodes);
+                    }
                 });
-                
-                console.log("Restored Monitor Data:", initialCodeMap); // Debug log
                 setStudentCodeMap(initialCodeMap);
             }
-            // ------------------------------------------------
         };
 
         const handleQuestionAdded = (q) => {
             setTestState(prev => {
+                if (!prev) return prev;
                 if (prev.questions.some(existing => existing.question_id === q.question_id)) return prev;
                 return { ...prev, questions: [...prev.questions, q] };
             });
         };
 
         const handleTestStarted = () => {
-            setTestState(prev => ({ ...prev, status: 'LIVE' }));
+            setTestState(prev => (prev ? { ...prev, status: 'LIVE' } : prev));
         };
 
         const handleParticipantJoin = (user) => {
@@ -103,13 +101,12 @@ const HostTestView = () => {
             });
         };
 
-        // 3. Error Handler (CRITICAL FOR DEBUGGING LOADING ISSUES)
         const handleError = (err) => {
             console.error("Socket Error:", err);
-            alert(`Error: ${err.message || "Unknown backend error"}`);
+            setError(err.message || "Unknown error occurred");
         };
 
-        // 4. Attach Listeners *BEFORE* Emitting
+        // Attach Listeners
         socket.on('test_state', handleTestState);
         socket.on('question_added', handleQuestionAdded);
         socket.on('test_started', handleTestStarted);
@@ -119,11 +116,10 @@ const HostTestView = () => {
         socket.on('participant_code_update', handleCodeUpdate);
         socket.on('error', handleError);
 
-        // 5. Emit Join Event
-        console.log("🔌 Emitting join_test for ID:", test_id);
+        // EMIT JOIN
         socket.emit('join_test', { test_id });
 
-        // 6. Cleanup
+        // Cleanup
         return () => {
             socket.off('test_state', handleTestState);
             socket.off('question_added', handleQuestionAdded);
@@ -134,10 +130,9 @@ const HostTestView = () => {
             socket.off('participant_code_update', handleCodeUpdate);
             socket.off('error', handleError);
         };
-    }, [socket, isConnected, test_id]); // Dependencies ensure this re-runs on reconnect
+    }, [socket, isConnected, test_id]);
 
     // --- Handlers ---
-
     const handleAddQuestion = () => {
         if (!newQ.title.trim()) return alert("Title required");
         socket.emit('add_question', { test_id, ...newQ });
@@ -177,6 +172,17 @@ const HostTestView = () => {
 
     // --- RENDER ---
 
+    // Show Error if occurred
+    if (error) return (
+        <div className="h-screen flex flex-col items-center justify-center bg-[#0D1117] text-white">
+            <div className="p-6 bg-red-900/20 border border-red-500/50 rounded-lg max-w-md text-center">
+                <h2 className="text-xl font-bold text-red-400 mb-2">Connection Error</h2>
+                <p className="text-gray-300 mb-4">{error}</p>
+                <button onClick={() => window.location.reload()} className="px-4 py-2 bg-red-600 rounded hover:bg-red-500">Retry</button>
+            </div>
+        </div>
+    );
+
     if (!isConnected) return (
         <div className="h-screen flex flex-col items-center justify-center bg-[#0D1117] text-white">
             <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-blue-500 mb-4"></div>
@@ -188,14 +194,14 @@ const HostTestView = () => {
         <div className="h-screen flex flex-col items-center justify-center bg-[#0D1117] text-white">
             <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-emerald-500 mb-4"></div>
             <p>Loading Test Data...</p>
-            <p className="text-xs text-gray-500 mt-2">If this takes long, check backend logs.</p>
+            <p className="text-xs text-gray-500 mt-2">If this persists, try refreshing page again....</p>
         </div>
     );
 
     return (
         <div className="min-h-screen bg-[#0D1117] text-gray-300 p-6 flex flex-col gap-6 font-sans">
-            
-            {/* Top Bar */}
+            {/* ... Rest of your UI remains identical ... */}
+            {/* Just copying the top bar for context, you can paste the rest of your render block here */}
             <div className="bg-[#161B22] p-4 rounded-xl border border-gray-800 flex justify-between items-center">
                 <div>
                     <h1 className="text-2xl font-bold text-white flex items-center gap-3">

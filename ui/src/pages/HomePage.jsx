@@ -58,26 +58,18 @@ const HomePage = () => {
   };
 
   // Updated: Asks for duration before creating test
+  
   const handleCreateTest = () => {
-    if (!socket) {
-      alert("Socket not connected. Please try again.");
-      return;
-    }
+    if (!socket) return alert("Socket not connected.");
     
-    // Prompt user for duration (default 60 mins)
     const durationInput = prompt("Enter test duration in minutes:", "60");
-    
-    // If user cancels prompt, do nothing
-    if (durationInput === null) return;
+    if (durationInput === null) return; // Cancelled
 
     const duration = parseInt(durationInput);
-    if (isNaN(duration) || duration <= 0) {
-        alert("Please enter a valid duration in minutes.");
-        return;
-    }
+    if (isNaN(duration) || duration <= 0) return alert("Invalid duration");
 
-    // Send the duration object to the backend
-    socket.emit('create_test', { duration }); 
+    // Send as Object { duration: 60 }
+    socket.emit('create_test', { duration });
   };
 
   const handleJoinTest = (e) => {

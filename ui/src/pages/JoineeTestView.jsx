@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useSocket } from '../context/SocketContext';
 import CodeEditor from './CodeEditor';
@@ -7,42 +7,69 @@ import { Clock, AlertCircle } from 'lucide-react';
 const JoineeTestView = () => {
     const { test_id } = useParams();
     const { socket, isConnected } = useSocket();
-    
-    // FIX 1: Correct usage of useNavigate (was const [navigate] = ...)
-    const navigate = useNavigate(); 
+    const navigate = useNavigate();
     
     const [testData, setTestData] = useState(null);
     const [activeQIndex, setActiveQIndex] = useState(0);
     const [timer, setTimer] = useState(0);
+    const [error, setError] = useState(null); // Added Error State
 
     // Local state for code
     const [currentCode, setCurrentCode] = useState('');
     const [currentLang, setCurrentLang] = useState('javascript');
+    // --- TIMER LOGIC ---
+    useEffect(() => {
+        if (timer <= 0) return;
 
+        const interval = setInterval(() => {
+            setTimer(prev => {
+                if (prev <= 1) {
+                    clearInterval(interval);
+                    
+                    // --- AUTO NAVIGATE LOGIC ---
+                    alert("Time is up! The test has ended.");
+                    
+                    // Ideally, we also tell the backend the user finished
+                    if (socket) socket.emit('submit_test', { test_id });
+                    
+                    navigate('/'); 
+                    // ---------------------------
+                    
+                    return 0;
+                }
+                return prev - 1;
+            });
+        }, 1000);
+
+        return () => clearInterval(interval);
+    }, [timer > 0, navigate, socket, test_id]); // Added dependencies for safety
     // --- SOCKET LOGIC ---
     useEffect(() => {
+        // Wait for valid socket connection
         if (!socket || !isConnected) return;
 
-        console.log("Joinee joining test:", test_id);
-        socket.emit('join_test', { test_id });
+        console.log("🔌 Connected. Joining test:", test_id);
+        setError(null);
 
+        // Define Handlers
         const handleTestState = (state) => {
-            console.log("Joinee State:", state);
+            console.log("✅ Joinee State Received:", state);
             setTestData(state);
             
-            // FIX 2: Only set timer from server if local timer is not running or out of sync
-            // This prevents the timer from jittering on every state update
+            // Set Timer
             if (state.timeLeft && state.timeLeft > 0) {
                 setTimer(prev => {
-                    // If we are within 2 seconds of server time, keep local time (smoother)
+                    // Only update if diff > 2s to prevent jitter
                     if (Math.abs(prev - state.timeLeft) > 2) return state.timeLeft;
                     return prev;
                 });
             }
 
-            // Restore code if exists
+            // Restore Saved Code
             if (state.questions && state.questions.length > 0) {
-                const saved = state.savedCode ? state.savedCode.find(s => s.question_id === state.questions[0].question_id) : null;
+                // Default to first question if index 0
+                const qId = state.questions[0].question_id;
+                const saved = state.savedCode ? state.savedCode.find(s => s.question_id === qId) : null;
                 if (saved) {
                     setCurrentCode(saved.code);
                     setCurrentLang(saved.language);
@@ -52,13 +79,12 @@ const JoineeTestView = () => {
 
         const handleTestStarted = ({ duration }) => {
             setTimer(duration);
-            setTestData(prev => ({ ...prev, status: 'LIVE' }));
+            setTestData(prev => (prev ? { ...prev, status: 'LIVE' } : prev));
         };
 
-        // FIX 3: Move Global Event Listeners here to ensure they don't get stale
         const handleKicked = () => {
             alert('You have been removed from the session by the host.');
-            navigate('/'); // This will now work because navigate is defined correctly
+            navigate('/');
         };
 
         const handleSubmitted = () => {
@@ -67,16 +93,25 @@ const JoineeTestView = () => {
         };
 
         const handleError = (err) => {
-            alert(err.message);
-            if (err.message.includes("submitted")) navigate('/');
+            console.error("Socket Error:", err);
+            setError(err.message || "Unknown error");
+            if (err.message && err.message.includes("submitted")) {
+                alert(err.message);
+                navigate('/');
+            }
         };
 
+        // Attach Listeners
         socket.on('test_state', handleTestState);
         socket.on('test_started', handleTestStarted);
-        socket.on('kicked', handleKicked);           // Listen for kick
+        socket.on('kicked', handleKicked);
         socket.on('test_submitted', handleSubmitted);
         socket.on('error', handleError);
 
+        // Emit Join Event
+        socket.emit('join_test', { test_id });
+
+        // Cleanup
         return () => {
             socket.off('test_state', handleTestState);
             socket.off('test_started', handleTestStarted);
@@ -86,9 +121,8 @@ const JoineeTestView = () => {
         };
     }, [socket, isConnected, test_id, navigate]);
 
-    // --- TIMER LOGIC (Fixed) ---
+    // --- TIMER LOGIC ---
     useEffect(() => {
-        // Only run if timer is > 0
         if (timer <= 0) return;
 
         const interval = setInterval(() => {
@@ -96,16 +130,14 @@ const JoineeTestView = () => {
                 if (prev <= 1) {
                     clearInterval(interval);
                     // Optional: Auto-submit when time runs out
-                    // socket.emit('submit_test', { test_id });
                     return 0;
                 }
                 return prev - 1;
             });
         }, 1000);
 
-        // Cleanup interval on unmount
         return () => clearInterval(interval);
-    }, [timer > 0]); // FIX 4: Only re-run effect if timer status (active/inactive) changes, not every second.
+    }, [timer > 0]); // Runs when timer starts/stops
 
     // --- HELPERS ---
     const formatTime = (seconds) => {
@@ -116,6 +148,7 @@ const JoineeTestView = () => {
 
     const handleCodeUpdate = (newVal) => {
         setCurrentCode(newVal);
+        // Debounced save logic
         if (socket && testData?.questions && testData.questions[activeQIndex]) {
             socket.emit('save_code', {
                 test_id,
@@ -143,14 +176,39 @@ const JoineeTestView = () => {
     };
 
     // --- RENDER ---
-    if (!isConnected) return <div className="h-screen flex items-center justify-center bg-[#0D1117] text-white">Connecting...</div>;
-    if (!testData) return <div className="h-screen flex items-center justify-center bg-[#0D1117] text-white">Loading Exam...</div>;
 
+    // Error View
+    if (error) return (
+        <div className="h-screen flex flex-col items-center justify-center bg-[#0D1117] text-white">
+            <div className="p-6 bg-red-900/20 border border-red-500/50 rounded-lg max-w-md text-center">
+                <h2 className="text-xl font-bold text-red-400 mb-2">Connection Error</h2>
+                <p className="text-gray-300 mb-4">{error}</p>
+                <button onClick={() => navigate('/')} className="px-4 py-2 bg-gray-700 rounded hover:bg-gray-600">Go Home</button>
+            </div>
+        </div>
+    );
+
+    // Loading View
+    if (!isConnected) return (
+        <div className="h-screen flex flex-col items-center justify-center bg-[#0D1117] text-white">
+            <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-blue-500 mb-4"></div>
+            <p>Connecting to Server...</p>
+        </div>
+    );
+
+    if (!testData) return (
+        <div className="h-screen flex flex-col items-center justify-center bg-[#0D1117] text-white">
+            <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-emerald-500 mb-4"></div>
+            <p>Loading Exam Data...</p>
+        </div>
+    );
+
+    // Waiting Room View
     if (testData.status === 'DRAFT') {
         return (
             <div className="h-screen flex flex-col items-center justify-center bg-[#0D1117] text-white gap-4">
                 <h1 className="text-3xl font-bold">Waiting for Host to Start...</h1>
-                <p className="text-gray-400">The exam has not started yet.</p>
+                <p className="text-gray-400">The exam has not started yet. Please stay on this page.</p>
                 <div className="mt-4 flex items-center gap-2 text-yellow-500 bg-yellow-500/10 px-4 py-2 rounded-lg">
                     <AlertCircle size={20} /> Status: {testData.status}
                 </div>
@@ -158,6 +216,7 @@ const JoineeTestView = () => {
         );
     }
 
+    // Main Exam View
     const activeQ = testData.questions[activeQIndex];
     const currentQuestionTestCases = testData.testCases
         .filter(tc => tc.question_id === activeQ.question_id)

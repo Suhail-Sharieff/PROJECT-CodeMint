@@ -42,35 +42,43 @@ class SocketManager {
         });
     }
 
-    async setupEventHandlers() {
+   async setupEventHandlers() {
         this.io.on('connection', async (socket) => {
             console.log(`🔌 User connected: ${socket.user.name} (${socket.id})`);
+            
             await this.setupSessionEvents(socket);
             await db.execute('UPDATE user SET socket_id=? WHERE user_id=?', [socket.id, socket.user.user_id]);
-            await this.setupTestEvents(socket);
-            // ... inside setupSessionEvents
+            await this.setupTestEvents(socket); // Initializes the join_test listener
+
+            // --- GLOBAL DISCONNECT HANDLER ---
             socket.on('disconnect', async () => {
                 console.log(`🔌 User disconnected: ${socket.user.name} (${socket.id})`);
-
                 const { user_id } = socket.user;
-                // Get the session_id we stored during the join
-                const session_id = socket.current_session_id;
 
-                if (session_id) {
+                // 1. Handle LIVE SESSION Disconnect (Delete & Notify)
+                if (socket.current_session_id) {
+                    const session_id = socket.current_session_id;
                     try {
-                        // 1. Remove the user from the session_participant table
-                        await db.execute(
-                            'DELETE FROM session_participant WHERE session_id=? AND user_id=?',
-                            [session_id, user_id]
-                        );
-
-                        // 2. Notify the Host (and all others in the room) that this user left
+                        // Remove from participant list (Sessions are ephemeral)
+                        await db.execute('DELETE FROM session_participant WHERE session_id=? AND user_id=?', [session_id, user_id]);
                         this.io.to(session_id).emit('joinee_left', user_id);
-
-                        console.log(`User ${user_id} removed from session ${session_id}`);
-
                     } catch (err) {
-                        console.error("Error handling disconnect: ", err);
+                        console.error("Error handling session disconnect:", err);
+                    }
+                }
+
+                // 2. Handle TEST Disconnect (Notify Only)
+                if (socket.current_test_id) {
+                    const test_id = socket.current_test_id;
+                    try {
+                        // NOTE: We DO NOT delete from 'test_participant' because they might be reloading!
+                        // We just tell the Host "Hey, this user is offline now".
+                        
+                        this.io.to(test_id).emit('joinee_left', user_id);
+                        console.log(`User ${user_id} disconnected from test ${test_id}`);
+                        
+                    } catch (err) {
+                        console.error("Error handling test disconnect:", err);
                     }
                 }
             });
@@ -277,49 +285,73 @@ class SocketManager {
                 socket.current_test_id = test_id;
                 const { user_id, name } = socket.user;
 
-                // Check Test Metadata
+                // 1. Metadata & Role
                 const [testRows] = await db.execute('SELECT host_id, status, start_time, duration FROM test WHERE test_id = ?', [test_id]);
                 if (testRows.length === 0) return socket.emit('error', { message: "Test not found" });
 
                 const testMeta = testRows[0];
                 const role = (testMeta.host_id === user_id) ? 'host' : 'joinee';
 
-                // BLOCK RE-ENTRY if finished
+                // 2. Check if Finished (Joinee only)
                 if (role === 'joinee') {
                     const [pCheck] = await db.execute('SELECT status FROM test_participant WHERE test_id=? AND user_id=?', [test_id, user_id]);
                     if (pCheck.length > 0 && pCheck[0].status === 'finished') {
                         socket.emit('error', { message: "You have already submitted this test." });
-                        return; // Stop execution
+                        return;
                     }
                 }
 
-                // Add/Update Participant
+                // 3. Add Participant
                 await db.execute(
                     `INSERT INTO test_participant (test_id, user_id, role) VALUES (?, ?, ?) 
-             ON DUPLICATE KEY UPDATE joined_at=NOW()`,
+                     ON DUPLICATE KEY UPDATE joined_at=NOW()`,
                     [test_id, user_id, role]
                 );
 
-                // Fetch Questions
+                // 4. Questions
                 const [questions] = await db.execute('SELECT * FROM question WHERE test_id = ?', [test_id]);
 
-                // SECURE TEST CASE FETCHING
+                // 5. Test Cases (FIXED: Send Hidden cases, but MASKED for Joinees)
                 let testCases = [];
                 if (questions.length > 0) {
                     const qIds = questions.map(q => q.question_id);
-                    let query = `SELECT * FROM testcase WHERE question_id IN (${qIds.join(',')})`;
-
-                    // CRITICAL: Joinees NEVER get hidden cases in the initial payload
-                    if (role === 'joinee') {
-                        query += ` AND is_hidden = FALSE`;
-                    }
+                    
+                    // Fetch ALL cases for these questions
+                    const query = `SELECT * FROM testcase WHERE question_id IN (${qIds.join(',')})`;
                     const [cases] = await db.execute(query);
-                    testCases = cases;
+
+                    // Sanitize Logic
+                    testCases = cases.map(tc => {
+                        if (role === 'joinee' && tc.is_hidden) {
+                            return {
+                                ...tc,
+                                stdin: "Hidden Case",          // Mask Input
+                                expected_output: "Hidden Output" // Mask Output
+                            };
+                        }
+                        return tc;
+                    });
                 }
 
-                // Fetch Saved Code & Participants (Existing logic...)
-                const [savedCode] = await db.execute('SELECT question_id, code, language FROM test_submissions WHERE test_id=? AND user_id=?', [test_id, user_id]);
+                // 6. Saved Code
+                let savedCode = [];
+                if (role === 'host') {
+                    const [allCodes] = await db.execute('SELECT user_id, question_id, code, language FROM test_submissions WHERE test_id=?', [test_id]);
+                    savedCode = allCodes;
+                } else {
+                    const [myCodes] = await db.execute('SELECT question_id, code, language FROM test_submissions WHERE test_id=? AND user_id=?', [test_id, user_id]);
+                    savedCode = myCodes;
+                }
+
+                // 7. Users & 8. Time
                 const [users] = await db.execute('SELECT u.user_id as id, u.name, tp.role, tp.status FROM test_participant tp JOIN user u ON tp.user_id = u.user_id WHERE tp.test_id = ?', [test_id]);
+                
+                let timeLeft = null;
+                if (testMeta.status === 'LIVE' && testMeta.start_time) {
+                    const now = new Date();
+                    const endTime = new Date(new Date(testMeta.start_time).getTime() + testMeta.duration * 60000);
+                    timeLeft = Math.max(0, Math.floor((endTime - now) / 1000));
+                }
 
                 // Emit State
                 socket.emit('test_state', {
@@ -327,9 +359,10 @@ class SocketManager {
                     status: testMeta.status,
                     role,
                     questions,
-                    testCases, // Contains ONLY visible cases for joinees
+                    testCases, // Now includes masked hidden cases for joinees
                     savedCode,
-                    users
+                    users,
+                    timeLeft
                 });
 
                 if (role === 'joinee') {
@@ -337,7 +370,7 @@ class SocketManager {
                 }
 
             } catch (err) {
-                console.error(err);
+                console.error("Error in join_test:", err);
                 socket.emit('error', { message: err.message });
             }
         });
@@ -369,9 +402,9 @@ class SocketManager {
 
         socket.on('submit_test', async ({ test_id }) => {
             await db.execute('UPDATE test_participant SET status="finished" WHERE test_id=? AND user_id=?', [test_id, user_id]);
-            socket.emit('test_submitted'); // Confirm to user
-            socket.to(test_id).emit('participant_finished', { userId: user_id }); // Notify Host
-            socket.disconnect(); // Kick them out
+            socket.emit('test_submitted'); 
+            socket.to(test_id).emit('participant_finished', { userId: user_id }); 
+            socket.disconnect(); 
         });
         // --- 3. Joinee Events ---
         socket.on('save_code', async ({ test_id, question_id, code, language }) => {
