@@ -50,7 +50,7 @@ CREATE TABLE IF NOT EXISTS codes (
     session_id VARCHAR(50),
     user_id INT,
     code MEDIUMTEXT, -- VARCHAR(10000) is too small. MEDIUMTEXT holds ~16MB.
-    code_lang VARCHAR(20) DEFAULT 'javascript',
+    code_lang VARCHAR(50) DEFAULT 'javascript',
     last_updated DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (session_id, user_id),
     FOREIGN KEY (session_id) REFERENCES session(session_id) ON DELETE CASCADE,

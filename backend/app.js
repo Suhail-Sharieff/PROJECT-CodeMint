@@ -64,6 +64,8 @@ import {authRouter} from "./routes/auth.routes.js"
 app.use('/auth',authRouter)
 import { sessionRouter } from "./routes/session.routes.js"
 app.use('/session',sessionRouter)
+import { editorRoute } from "./routes/editor.routes.js"
+app.use('/editor',editorRoute)
 
 
 import { ApiError } from "./Utils/Api_Error.utils.js"
