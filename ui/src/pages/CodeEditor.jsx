@@ -1,8 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Editor from '@monaco-editor/react';
 import {
   Play, CheckCircle, XCircle, Loader2,
-  Terminal, Plus, Trash2, Lock // <--- 1. Added Lock Icon
+  Terminal, Plus, Trash2, Lock 
 } from 'lucide-react';
 import api from '../services/api';
 
@@ -23,11 +23,13 @@ const CodeEditor = ({
   onChange,
   onLanguageChange,
   readOnly = false,
-  initialTestCases
+  initialTestCases,
+  onScoreUpdate,
+  questionId
 }) => {
   // --- State ---
   const [activeTab, setActiveTab] = useState('testcase');
-  // Updated initial state to include is_hidden default logic if needed
+  // Default state
   const [testCases, setTestCases] = useState([{ id: 1, input: '', expected: '', is_hidden: 0 }]);
   const [activeTestCaseId, setActiveTestCaseId] = useState(1);
   const [testResults, setTestResults] = useState(null);
@@ -50,7 +52,7 @@ const CodeEditor = ({
     return 'plaintext';
   };
 
-  // --- Fetch Languages & Set Initial Template ---
+  // --- 1. Fetch Languages on Mount ---
   useEffect(() => {
     const fetchLanguages = async () => {
       if (readOnly) return;
@@ -76,17 +78,31 @@ const CodeEditor = ({
     };
 
     fetchLanguages();
+  }, [readOnly]); 
 
+  // --- 2. Sync Test Cases when Props Change (CRITICAL FIX) ---
+  useEffect(() => {
+    // Only update if we have new cases coming in (like switching questions)
+    // Or if we are switching from no cases to some cases
     if (initialTestCases && initialTestCases.length > 0) {
-      // Ensure loaded cases handle the flag correctly, defaulting to 0 if undefined
       const processedCases = initialTestCases.map(tc => ({
         ...tc,
-        is_hidden: tc.is_hidden === 1 ? 1 : 0
+        // Ensure is_hidden is consistently 0 or 1 for logic checks
+        is_hidden: (tc.is_hidden === 1 || tc.is_hidden === true) ? 1 : 0
       }));
       setTestCases(processedCases);
+      // Reset selection to first case of the new question
       setActiveTestCaseId(processedCases[0].id);
+      // Clear old results from previous question
+      setTestResults(null);
+    } else {
+      // If no initial cases (e.g. creating new question), reset to default empty case
+      if (!questionId) {
+          setTestCases([{ id: 1, input: '', expected: '', is_hidden: 0 }]);
+          setActiveTestCaseId(1);
+      }
     }
-  }, [readOnly]);
+  }, [initialTestCases, questionId]); // Dependency on initialTestCases ensures update
 
   // --- Handle Language Change ---
   const handleLanguageSelect = (e) => {
@@ -131,14 +147,12 @@ const CodeEditor = ({
 
   const addTestCase = () => {
     const newId = testCases.length > 0 ? Math.max(...testCases.map(t => t.id)) + 1 : 1;
-    // <--- 2. Default is_hidden to 0 for new user-created cases
     setTestCases([...testCases, { id: newId, input: '', expected: '', is_hidden: 0 }]); 
     setActiveTestCaseId(newId);
   };
 
   const removeTestCase = (id, e) => {
     e.stopPropagation();
-    // Security check: prevent deleting if hidden
     const targetCase = testCases.find(tc => tc.id === id);
     if (targetCase?.is_hidden === 1) return;
 
@@ -159,32 +173,62 @@ const CodeEditor = ({
       const selectedLangObj = languageList.find(l => l.name === language);
       const language_id = selectedLangObj ? selectedLangObj.id : 63;
 
-      const promises = testCases.map(testCase =>
-        api.post(`editor/submitCode`, {
-          language_id,
-          source_code: value,
-          stdin: testCase.input,
-          expected_output: testCase.expected
-        }).then(res => ({
-          ...res.data,
-          testCaseId: testCase.id,
-          // We still store these for logic, but UI will hide them if is_hidden=1
-          input: testCase.input,
-          expected: testCase.expected
-        })).catch(err => ({
-          status: { id: 0, description: "Error" },
-          stderr: err.message,
-          testCaseId: testCase.id,
-          input: testCase.input,
-          expected: testCase.expected
-        }))
-      );
+      let responseData;
 
-      const results = await Promise.all(promises);
-      setTestResults(results);
+      // SCENARIO A: Running against Question (OA Mode)
+      if (questionId) {
+          const response = await api.post(`/editor/submitCode`, {
+            language_id,
+            source_code: value,
+            question_id: questionId
+          });
+          responseData = response.data;
+      } 
+      // SCENARIO B: Custom Run (Solo Mode)
+      else {
+          const promises = testCases.map(testCase =>
+            api.post(`/editor/submitCode`, {
+              language_id,
+              source_code: value,
+              stdin: testCase.input,
+              expected_output: testCase.expected
+            }).then(res => ({
+              ...res.data,
+              testCaseId: testCase.id,
+              input: testCase.input,
+              expected: testCase.expected
+            })).catch(err => ({
+              status: { id: 0, description: "Error" },
+              stderr: err.message,
+              testCaseId: testCase.id,
+              input: testCase.input,
+              expected: testCase.expected
+            }))
+          );
+          const results = await Promise.all(promises);
+          responseData = { results }; // Uniform structure
+      }
+
+      // --- Process Results ---
+      if (responseData) {
+          // 1. Handle Results Array
+          const resultsArray = Array.isArray(responseData) ? responseData : (responseData.results || []);
+          setTestResults(resultsArray);
+
+          // 2. Notify Score
+          if (typeof responseData.score === 'number' && onScoreUpdate) {
+              onScoreUpdate(responseData.score);
+          }
+      }
 
     } catch (error) {
       console.error("Execution error:", error);
+      // Visual Error Feedback
+      setTestResults([{
+          status: { id: 0, description: "Execution Error" },
+          stderr: error.response?.data?.message || error.message,
+          testCaseId: activeTestCaseId
+      }]);
     } finally {
       setIsLoading(false);
     }
@@ -213,7 +257,7 @@ const CodeEditor = ({
   return (
     <div className="flex flex-col h-full border border-[#30363D] rounded-lg overflow-hidden bg-[#0D1117] text-gray-300 font-sans shadow-xl">
 
-      {/* --- TOOLBAR (Unchanged) --- */}
+      {/* --- TOOLBAR --- */}
       {!readOnly && (
         <div className="flex-shrink-0 flex items-center justify-between p-3 bg-[#161B22] border-b border-[#30363D]">
           <div className="flex items-center gap-4">
@@ -243,7 +287,7 @@ const CodeEditor = ({
         </div>
       )}
 
-      {/* --- EDITOR (Unchanged) --- */}
+      {/* --- EDITOR --- */}
       <div className="flex-1 relative min-h-0">
         <Editor
           height="100%"
@@ -255,7 +299,7 @@ const CodeEditor = ({
         />
       </div>
 
-      {/* --- RESIZE HANDLE (Unchanged) --- */}
+      {/* --- RESIZE HANDLE --- */}
       {!readOnly && (
         <div onMouseDown={(e) => { e.preventDefault(); setIsDragging(true); }} className="h-1.5 bg-[#161B22] border-y border-[#30363D] cursor-row-resize flex items-center justify-center hover:bg-blue-500/20 transition-colors z-10 group">
           <div className="w-8 h-1 rounded-full bg-gray-600 group-hover:bg-blue-400 transition-colors" />
@@ -289,17 +333,20 @@ const CodeEditor = ({
                       Case {idx + 1}
                     </div>
                     
-                    {/* <--- 3. Lock Icon OR Delete Icon */}
+                    {/* Lock Icon for Hidden, Delete for Visible */}
                     {tc.is_hidden === 1 ? (
                        <Lock className="w-3 h-3 text-gray-600" /> 
                     ) : (
-                       testCases.length > 1 && <Trash2 onClick={(e) => removeTestCase(tc.id, e)} className="w-3 h-3 opacity-0 group-hover:opacity-100 hover:text-red-400" />
+                       // Only allow delete if in Solo mode (no questionId) or if you want to allow removing local samples
+                       !questionId && testCases.length > 1 && <Trash2 onClick={(e) => removeTestCase(tc.id, e)} className="w-3 h-3 opacity-0 group-hover:opacity-100 hover:text-red-400" />
                     )}
 
                   </button>
                 )
               })}
-              <button onClick={addTestCase} className="flex items-center gap-2 px-3 py-2 text-xs text-emerald-400 hover:bg-[#21262d] rounded"><Plus className="w-3 h-3" /> Add Case</button>
+              {!questionId && (
+                  <button onClick={addTestCase} className="flex items-center gap-2 px-3 py-2 text-xs text-emerald-400 hover:bg-[#21262d] rounded"><Plus className="w-3 h-3" /> Add Case</button>
+              )}
             </div>
 
             {/* RIGHT CONTENT */}
@@ -308,7 +355,7 @@ const CodeEditor = ({
               {/* --- INPUT / EXPECTED TAB --- */}
               {activeTab === 'testcase' && (
                 <div className="h-full">
-                    {/* <--- 4. Locked View for Hidden Test Cases */}
+                    {/* Locked View for Hidden Test Cases */}
                     {activeInput?.is_hidden === 1 ? (
                         <div className="flex flex-col items-center justify-center h-full text-gray-500 space-y-3 select-none">
                             <div className="p-4 bg-[#161B22] rounded-full border border-[#30363D]">
@@ -323,11 +370,23 @@ const CodeEditor = ({
                         <div className="space-y-4">
                         <div>
                             <label className="block text-xs font-bold text-gray-500 mb-2 uppercase">Input (Stdin)</label>
-                            <textarea value={activeInput?.input || ''} onChange={(e) => updateTestCase('input', e.target.value)} className="w-full h-24 bg-[#161B22] border border-[#30363D] rounded p-3 text-sm font-mono text-gray-300 focus:border-emerald-500 focus:outline-none resize-none" placeholder="Enter input..." />
+                            <textarea 
+                                value={activeInput?.input || ''} 
+                                onChange={(e) => updateTestCase('input', e.target.value)} 
+                                readOnly={!!questionId} // Read-only if part of OA question
+                                className="w-full h-24 bg-[#161B22] border border-[#30363D] rounded p-3 text-sm font-mono text-gray-300 focus:border-emerald-500 focus:outline-none resize-none" 
+                                placeholder="Enter input..." 
+                            />
                         </div>
                         <div>
                             <label className="block text-xs font-bold text-gray-500 mb-2 uppercase">Expected Output</label>
-                            <textarea value={activeInput?.expected || ''} onChange={(e) => updateTestCase('expected', e.target.value)} className="w-full h-24 bg-[#161B22] border border-[#30363D] rounded p-3 text-sm font-mono text-gray-300 focus:border-emerald-500 focus:outline-none resize-none" placeholder="Enter expected output..." />
+                            <textarea 
+                                value={activeInput?.expected || ''} 
+                                onChange={(e) => updateTestCase('expected', e.target.value)} 
+                                readOnly={!!questionId} // Read-only if part of OA question
+                                className="w-full h-24 bg-[#161B22] border border-[#30363D] rounded p-3 text-sm font-mono text-gray-300 focus:border-emerald-500 focus:outline-none resize-none" 
+                                placeholder="Enter expected output..." 
+                            />
                         </div>
                         </div>
                     )}
@@ -353,7 +412,7 @@ const CodeEditor = ({
                       </div>
 
                       {activeResult ? (
-                        /* <--- 5. Locked Result View */
+                        /* Locked Result View */
                         activeInput?.is_hidden === 1 ? (
                             <div className="mt-8 text-center p-6 rounded-lg border border-[#30363D] bg-[#161B22]/50">
                                 <div className="flex items-center justify-center mb-3">

@@ -57,8 +57,8 @@ const HomePage = () => {
       try {
         const res = await api.get(`/session/getHostIdOf/${joinSessionId.trim()}`);
         const host_id = res.data.data; // ApiResponse wraps data in .data field
-        console.log(`host_id=${host_id} user_id=${user.user_id}`);
-        console.log('res',res);
+        // console.log(`host_id=${host_id} user_id=${user.user_id}`);
+        // console.log('res',res);
         
         if (host_id !== user.user_id) {
           console.log('user is not host');
@@ -94,10 +94,29 @@ const HomePage = () => {
     socket.emit('create_test', { duration ,title});
   };
 
-  const handleJoinTest = (e) => {
+  const handleJoinTest = async(e) => {
     e.preventDefault();
     if (joinTestId.trim()) {
-      navigate(`/joineeTestView/${joinTestId.trim()}`);
+      try {
+        const res = await api.get(`/test/getTestHostID/${joinTestId.trim()}`);
+        const host_id = res.data; // ApiResponse wraps data in .data field
+        console.log(`host_id=${host_id} user_id=${user.user_id}`);
+        console.log('res',res);
+        
+        if (host_id !== user.user_id) {
+          console.log('user is not host');
+          
+          navigate(`/joineeTestView/${joinTestId.trim()}`);
+        } else {
+          console.log('user is host');
+          
+          navigate(`/hostTestView/${joinTestId.trim()}`);
+        }
+      } catch (err) {
+        console.error('Error joining test:', err);
+        alert('Failed to join test. Please check the test ID and try again.');
+      }
+      
     }
   };
 
@@ -112,6 +131,17 @@ const HomePage = () => {
               Welcome back, <span className="text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 to-cyan-400">{user.name}</span>
             </h1>
             <p className="text-gray-500">What would you like to do today?</p>
+          </div>
+
+          {/* Quick Actions Bar */}
+          <div className="mb-8 flex gap-3">
+            <button
+              onClick={() => navigate('/myTests')}
+              className="px-6 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-semibold transition-all flex items-center gap-2"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+              My Tests
+            </button>
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">

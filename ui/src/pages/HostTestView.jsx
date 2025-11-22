@@ -106,6 +106,14 @@ const HostTestView = () => {
             setError(err.message || "Unknown error occurred");
         };
 
+        const handleScoreUpdate = ({ userId, score }) => {
+            setParticipants(prev => prev.map(p => 
+                p.id === userId ? { ...p, score: Math.max(p.score || 0, score) } : p
+            ));
+        };
+
+        socket.on('participant_score_update', handleScoreUpdate);
+
         // Attach Listeners
         socket.on('test_state', handleTestState);
         socket.on('question_added', handleQuestionAdded);
@@ -129,6 +137,7 @@ const HostTestView = () => {
             socket.off('participant_finished', handleParticipantFinished);
             socket.off('participant_code_update', handleCodeUpdate);
             socket.off('error', handleError);
+            socket.off('participant_score_update', handleScoreUpdate);
         };
     }, [socket, isConnected, test_id]);
 

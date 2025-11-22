@@ -75,6 +75,17 @@ const getTestAnalysis=asyncHandler(
         }
     }
 )
+const getTestHostID=asyncHandler(
+    async(req,res)=>{
+        try{
+            const {test_id}=req.params
+            if(!test_id) throw new ApiError(400,`test_id not provided in parms to get host of test!`) 
+            const [rows]=await db.execute('select host_id from test where test_id=?',[test_id])
+            return res.status(200).json(rows[0].host_id)
+        }catch(err){
+            return res.status(400).json(new ApiError(400,err.message))
+        }
+    }
+)
 
-
-export {createTest,joinTest,getTestsByMe,getTestAnalysis}
+export {createTest,joinTest,getTestsByMe,getTestAnalysis,getTestHostID}

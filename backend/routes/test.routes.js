@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { verifyJWT } from "../middleware/auth.middleware.js";
-import { getTestAnalysis, getTestsByMe } from "../controller/test.controller.js";
+import { getTestAnalysis, getTestHostID, getTestsByMe } from "../controller/test.controller.js";
 
 const testRouter=Router()
 
@@ -13,6 +13,10 @@ testRouter
 testRouter
 .route('/getTestDetails')
 .get(getTestAnalysis)
+
+testRouter
+.route('/getTestHostID/:test_id')
+.get(getTestHostID)
 
 
 export {testRouter}

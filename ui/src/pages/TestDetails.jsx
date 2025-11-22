@@ -91,7 +91,7 @@ const TestDetailsPage = () => {
       <header className="bg-[#161B22] border-b border-gray-800 p-4 flex items-center justify-between">
         <div className="flex items-center gap-4">
           <button 
-            onClick={() => navigate('/my-tests')} 
+            onClick={() => navigate('/myTests')} 
             className="p-2 rounded hover:bg-gray-800 text-gray-400 hover:text-white transition-colors"
           >
             <ArrowLeft size={20} />

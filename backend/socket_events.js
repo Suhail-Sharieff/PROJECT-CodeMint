@@ -42,10 +42,10 @@ class SocketManager {
         });
     }
 
-   async setupEventHandlers() {
+    async setupEventHandlers() {
         this.io.on('connection', async (socket) => {
             console.log(`🔌 User connected: ${socket.user.name} (${socket.id})`);
-            
+
             await this.setupSessionEvents(socket);
             await db.execute('UPDATE user SET socket_id=? WHERE user_id=?', [socket.id, socket.user.user_id]);
             await this.setupTestEvents(socket); // Initializes the join_test listener
@@ -73,10 +73,10 @@ class SocketManager {
                     try {
                         // NOTE: We DO NOT delete from 'test_participant' because they might be reloading!
                         // We just tell the Host "Hey, this user is offline now".
-                        
+
                         this.io.to(test_id).emit('joinee_left', user_id);
                         console.log(`User ${user_id} disconnected from test ${test_id}`);
-                        
+
                     } catch (err) {
                         console.error("Error handling test disconnect:", err);
                     }
@@ -108,13 +108,13 @@ class SocketManager {
 
         socket.on('join_session', async ({ session_id }) => {
             const [temp] = await db.execute('SELECT is_ended FROM session WHERE session_id = ?', [session_id]);
-            console.log('join session: ',temp);
-            
-            if(!temp[0]){
+            console.log('join session: ', temp);
+
+            if (!temp[0]) {
                 socket.emit('error', { message: "No such session id exists!" });
                 return;
             }
-            if(temp[0].is_ended===1){
+            if (temp[0].is_ended === 1) {
                 socket.emit('error', { message: "This session has ended already" });
                 return;
             }
@@ -279,12 +279,12 @@ class SocketManager {
             this.io.to(test_id).emit('joinee_left', user_id_to_kick);
         });
         // --- 1. Create & Join Logic ---
-        socket.on('create_test', async ({ duration ,title}) => {
+        socket.on('create_test', async ({ duration, title }) => {
             const test_id = uuidv4();
             // Default to 60 if not provided, ensure it is INT
             const finalDuration = parseInt(duration) || 60;
 
-            await createTest(user_id, test_id, finalDuration,title);
+            await createTest(user_id, test_id, finalDuration, title);
             await joinTest(user_id, test_id);
 
             socket.emit('test_created', test_id);
@@ -303,9 +303,9 @@ class SocketManager {
                 const testMeta = testRows[0];
                 const role = (testMeta.host_id === user_id) ? 'host' : 'joinee';
 
-                if(testMeta.status==='ENDED'){
+                if (testMeta.status === 'ENDED') {
                     socket.emit('error', { message: "This test has ended already" });
-                        return;
+                    return;
                 }
 
                 // 2. Check if Finished (Joinee only)
@@ -331,7 +331,7 @@ class SocketManager {
                 let testCases = [];
                 if (questions.length > 0) {
                     const qIds = questions.map(q => q.question_id);
-                    
+
                     // Fetch ALL cases for these questions
                     const query = `SELECT * FROM testcase WHERE question_id IN (${qIds.join(',')})`;
                     const [cases] = await db.execute(query);
@@ -354,7 +354,7 @@ class SocketManager {
 
                 // 7. Users & 8. Time
                 const [users] = await db.execute('SELECT u.user_id as id, u.name, tp.role, tp.status FROM test_participant tp JOIN user u ON tp.user_id = u.user_id WHERE tp.test_id = ?', [test_id]);
-                
+
                 let timeLeft = null;
                 if (testMeta.status === 'LIVE' && testMeta.start_time) {
                     const now = new Date();
@@ -437,9 +437,9 @@ class SocketManager {
 
         socket.on('submit_test', async ({ test_id }) => {
             await db.execute('UPDATE test_participant SET status="finished" WHERE test_id=? AND user_id=?', [test_id, user_id]);
-            socket.emit('test_submitted'); 
-            socket.to(test_id).emit('participant_finished', { userId: user_id }); 
-            socket.disconnect(); 
+            socket.emit('test_submitted');
+            socket.to(test_id).emit('participant_finished', { userId: user_id });
+            socket.disconnect();
         });
         // --- 3. Joinee Events ---
         socket.on('save_code', async ({ test_id, question_id, code, language }) => {
@@ -457,6 +457,15 @@ class SocketManager {
                 questionId: question_id,
                 code,
                 language
+            });
+        });
+
+        // New listener to broadcast score updates
+        socket.on('score_update', ({ test_id, score }) => {
+            // Broadcast to the room (so Host sees it in the sidebar)
+            socket.to(test_id).emit('participant_score_update', { 
+                userId: socket.user.user_id, 
+                score: score 
             });
         });
     }

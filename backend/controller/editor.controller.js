@@ -30,13 +30,17 @@ const constants_body = {
 
 const submitCode = asyncHandler(async (req, res) => {
     const { language_id, source_code, stdin, expected_output, question_id } = req.body;
+    
+    // NOTE: Ensure your route middleware adds user info (verifyJWT)
+    // If this endpoint is public, you'll need to pass user_id in body (less secure)
+    const user_id = req.user.user_id; 
 
     if (!language_id || !source_code) throw new ApiError(400, "language_id/source_code missing!");
 
     try {
         let results = [];
 
-        // SCENARIO 1: Running specific input (e.g., Custom input in Editor)
+        // --- SCENARIO 1: Custom Run (Not part of scoring) ---
         if (!question_id) {
             const response = await axios.post(`${JUDGE0}/submissions`, 
                 { language_id, source_code, stdin, expected_output, ...constants_body },
@@ -45,11 +49,15 @@ const submitCode = asyncHandler(async (req, res) => {
             return res.status(200).json(response.data);
         }
 
-       const [dbCases] = await db.execute('SELECT * FROM testcase WHERE question_id = ?', [question_id]);
+        // --- SCENARIO 2: Test Submission (Scoring) ---
+        // 1. Fetch Test Cases
+        const [dbCases] = await db.execute('SELECT * FROM testcase WHERE question_id = ?', [question_id]);
         
         if (dbCases.length === 0) return res.status(200).json({ message: "No test cases found." });
 
-        // Run all cases
+        // 2. Run All Cases
+        let passedCount = 0;
+        
         const promises = dbCases.map(async (testCase) => {
             try {
                 const judgeRes = await axios.post(`${JUDGE0}/submissions`, 
@@ -64,22 +72,28 @@ const submitCode = asyncHandler(async (req, res) => {
                 );
                 
                 const result = judgeRes.data;
+                
+                // Count Passes (Status ID 3 = Accepted)
+                if (result.status.id === 3) {
+                    passedCount++;
+                }
 
-                // === SECURITY FIX: MASK HIDDEN RESULTS ===
+                
+
+                // Sanitize Hidden Cases
                 if (testCase.is_hidden) {
                     return {
                         testCaseId: testCase.case_id,
-                        status: result.status, // Only Pass/Fail status allowed
+                        status: result.status,
                         time: result.time,
                         memory: result.memory,
-                        isHidden: true, // Flag for frontend UI
-                        input: "Hidden Input", 
+                        isHidden: true,
+                        input: "Hidden Input",
                         expected: "Hidden Expected",
                         stdout: "Hidden Output",
-                        stderr: null // Hide errors too
+                        stderr: null
                     };
                 } else {
-                    // Return normal data for visible cases
                     return {
                         testCaseId: testCase.case_id,
                         status: result.status,
@@ -99,11 +113,41 @@ const submitCode = asyncHandler(async (req, res) => {
         });
 
         results = await Promise.all(promises);
-        return res.status(200).json(results);
+
+        // 3. Update Score in DB (Logic: Keep Highest Score)
+        let finalScore = 0; // Variable to hold the calculated score
+
+        if (user_id) {
+            const [qRows] = await db.execute('SELECT test_id FROM question WHERE question_id=?', [question_id]);
+            
+            if (qRows.length > 0) {
+                const test_id = qRows[0].test_id;
+                const totalCases = dbCases.length;
+
+                // Calculate Score
+                if (totalCases > 0) {
+                    finalScore = Math.round((passedCount / totalCases) * 100);
+                }
+
+                // Update DB
+                await db.execute(`
+                    UPDATE test_participant 
+                    SET score = GREATEST(score, ?) 
+                    WHERE test_id = ? AND user_id = ?
+                `, [finalScore, test_id, user_id]);
+            }
+        }
+        
+        console.log('result', results);
+        
+        // FIX: Return the score in the response so frontend knows it!
+        return res.status(200).json({
+            results: results,
+            score: finalScore
+        });
 
     } catch (error) {
         return res.status(400).json(new ApiError(400, error.message));
     }
 });
-
 export { getLanguages, submitCode };

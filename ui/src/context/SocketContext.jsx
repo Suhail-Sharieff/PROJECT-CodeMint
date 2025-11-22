@@ -104,6 +104,11 @@ export const SocketProvider = ({ children }) => {
       setIsConnected(false);
     });
 
+    newSocket.on('error', (e) => {
+      alert(e.message);
+    });
+
+
     setSocket(newSocket);
 
     // Cleanup on unmount or when user/token changes
