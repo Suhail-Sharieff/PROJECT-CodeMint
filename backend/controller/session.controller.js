@@ -24,6 +24,21 @@ const createSession=
 
     }
 
+
+const getHostIdOf=asyncHandler(
+    async(req,res)=>{
+        const {session_id}=req.params
+        console.log(req.params);
+        
+        if(!session_id) throw new ApiError(400, 'Please provide session_id to find host of!')
+        
+        const [rows]=await db.execute('select host_id from session where session_id=?',[session_id])
+        
+        if(rows.length<=0) throw new ApiError(404, 'No such session_id exists!')
+        
+        return res.status(200).json(new ApiResponse(200, rows[0].host_id, 'Host ID retrieved successfully'))
+    }
+)
 const joinSession=
     async(user_id,session_id)=>{
        try{
@@ -44,4 +59,4 @@ const joinSession=
     }
 
 
-export {createSession,joinSession}
+export {createSession,joinSession,getHostIdOf}

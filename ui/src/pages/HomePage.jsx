@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../context/SocketContext';
+import api from '../services/api';
 
 const HomePage = () => {
   const { user } = useAuth();
@@ -50,10 +51,28 @@ const HomePage = () => {
     socket.emit('create_session');
   };
 
-  const handleJoinSession = (e) => {
+  const handleJoinSession = async(e) => {
     e.preventDefault();
     if (joinSessionId.trim()) {
-      navigate(`/joinView/${joinSessionId.trim()}`);
+      try {
+        const res = await api.get(`/session/getHostIdOf/${joinSessionId.trim()}`);
+        const host_id = res.data.data; // ApiResponse wraps data in .data field
+        console.log(`host_id=${host_id} user_id=${user.user_id}`);
+        console.log('res',res);
+        
+        if (host_id !== user.user_id) {
+          console.log('user is not host');
+          
+          navigate(`/joinView/${joinSessionId.trim()}`);
+        } else {
+          console.log('user is host');
+          
+          navigate(`/hostView/${joinSessionId.trim()}`);
+        }
+      } catch (err) {
+        console.error('Error joining session:', err);
+        alert('Failed to join session. Please check the session ID and try again.');
+      }
     }
   };
 
