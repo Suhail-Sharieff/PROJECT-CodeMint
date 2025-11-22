@@ -82,6 +82,25 @@ const JoineeTestView = () => {
             setTestData(prev => (prev ? { ...prev, status: 'LIVE' } : prev));
         };
 
+        const handleTestEnded = ({ test_id: endedId } = {}) => {
+            try { alert('The host has ended the test.'); } catch (e) {}
+            // Clean up socket listeners and go home
+            try {
+                if (socket) {
+                    socket.off('test_state');
+                    socket.off('test_started');
+                    socket.off('kicked');
+                    socket.off('test_submitted');
+                    socket.off('error');
+                    socket.off('test_ended');
+                    socket.disconnect();
+                }
+            } catch (e) {
+                console.warn('Cleanup error after test end:', e);
+            }
+            navigate('/');
+        };
+
         const handleKicked = () => {
             alert('You have been removed from the session by the host.');
             navigate('/');
@@ -94,16 +113,35 @@ const JoineeTestView = () => {
 
         const handleError = (err) => {
             console.error("Socket Error:", err);
-            setError(err.message || "Unknown error");
-            if (err.message && err.message.includes("submitted")) {
-                alert(err.message);
-                navigate('/');
+            const message = (err && (err.message || err.msg)) || String(err) || "Unknown error";
+
+            // Show the error to the user, then clean up socket and navigate home to avoid repeated alerts
+            try { alert(message); } catch (e) { /* ignore if alert blocked */ }
+
+            setError(message);
+
+            // Defensive cleanup: remove listeners and disconnect so we don't keep receiving the same error
+            try {
+                if (socket) {
+                    socket.off('test_state');
+                    socket.off('test_started');
+                    socket.off('kicked');
+                    socket.off('test_submitted');
+                    socket.off('error');
+                    socket.disconnect();
+                }
+            } catch (cleanupErr) {
+                console.warn('Error during socket cleanup:', cleanupErr);
             }
+
+            // Navigate home after cleanup
+            navigate('/');
         };
 
         // Attach Listeners
         socket.on('test_state', handleTestState);
         socket.on('test_started', handleTestStarted);
+        socket.on('test_ended', handleTestEnded);
         socket.on('kicked', handleKicked);
         socket.on('test_submitted', handleSubmitted);
         socket.on('error', handleError);
@@ -115,6 +153,7 @@ const JoineeTestView = () => {
         return () => {
             socket.off('test_state', handleTestState);
             socket.off('test_started', handleTestStarted);
+            socket.off('test_ended', handleTestEnded);
             socket.off('kicked', handleKicked);
             socket.off('test_submitted', handleSubmitted);
             socket.off('error', handleError);

@@ -157,6 +157,17 @@ const HostTestView = () => {
         }
     };
 
+    const endTest = () => {
+        if (!testState) return;
+        if (window.confirm("End the test for all participants? This cannot be undone.")) {
+            socket.emit('end_test', { test_id });
+            // Optimistic UI update
+            setTestState(prev => prev ? { ...prev, status: 'ENDED' } : prev);
+            // Optionally navigate away for host
+            navigate('/');
+        }
+    };
+
     const handleKick = (userId) => {
         if(window.confirm("Kick this user from the test?")) {
             socket.emit('kick_test_user', { test_id, user_id_to_kick: userId });
@@ -228,6 +239,11 @@ const HostTestView = () => {
                     {testState.status === 'DRAFT' && (
                         <button onClick={startTest} className="px-6 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-bold flex items-center gap-2 shadow-lg shadow-emerald-900/20">
                             <Play size={18}/> Start Test
+                        </button>
+                    )}
+                    {testState.status === 'LIVE' && (
+                        <button onClick={endTest} className="px-6 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg font-bold flex items-center gap-2 shadow-lg shadow-red-900/20">
+                            <Trash2 size={18}/> End Test
                         </button>
                     )}
                 </div>

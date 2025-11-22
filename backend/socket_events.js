@@ -107,6 +107,17 @@ class SocketManager {
         // inside socketManager.js -> setupSessionEvents
 
         socket.on('join_session', async ({ session_id }) => {
+            const [temp] = await db.execute('SELECT is_ended FROM session WHERE session_id = ?', [session_id]);
+            console.log('join session: ',temp);
+            
+            if(!temp[0]){
+                socket.emit('error', { message: "No such session id exists!" });
+                return;
+            }
+            if(temp[0].is_ended===1){
+                socket.emit('error', { message: "This session has ended already" });
+                return;
+            }
             socket.join(session_id);
 
             // --- ADD THIS LINE ---
@@ -292,6 +303,11 @@ class SocketManager {
                 const testMeta = testRows[0];
                 const role = (testMeta.host_id === user_id) ? 'host' : 'joinee';
 
+                if(testMeta.status==='ENDED'){
+                    socket.emit('error', { message: "This test has ended already" });
+                        return;
+                }
+
                 // 2. Check if Finished (Joinee only)
                 if (role === 'joinee') {
                     const [pCheck] = await db.execute('SELECT status FROM test_participant WHERE test_id=? AND user_id=?', [test_id, user_id]);
@@ -391,6 +407,32 @@ class SocketManager {
             await db.execute('UPDATE test SET status="LIVE", start_time=NOW() WHERE test_id=?', [test_id]);
             const [rows] = await db.execute('SELECT duration FROM test WHERE test_id=?', [test_id]);
             this.io.to(test_id).emit('test_started', { duration: rows[0].duration * 60 });
+        });
+
+        // --- HOST: End Test ---
+        socket.on('end_test', async ({ test_id }) => {
+            try {
+                // Verify host
+                const [check] = await db.execute('SELECT host_id FROM test WHERE test_id=?', [test_id]);
+                if (!check[0] || check[0].host_id !== user_id) return;
+
+                // 1. Mark test as ended in DB
+                await db.execute('UPDATE test SET status="ENDED" WHERE test_id=?', [test_id]);
+
+                // 2. Notify all participants that test ended
+                this.io.to(test_id).emit('test_ended', { test_id });
+
+                // 3. Optional cleanup: remove sockets from room (they may reconnect to other rooms later)
+                const socketsInRoom = await this.io.in(test_id).fetchSockets();
+                for (const s of socketsInRoom) {
+                    s.leave(test_id);
+                    s.current_test_id = null;
+                }
+
+                console.log(`Test ${test_id} ended by host ${user_id}`);
+            } catch (err) {
+                console.error('Error ending test:', err);
+            }
         });
 
         socket.on('submit_test', async ({ test_id }) => {

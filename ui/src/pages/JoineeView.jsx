@@ -24,10 +24,20 @@ const JoinView = () => {
     const [activeTab, setActiveTab] = useState('host'); // 'host' | 'mine'
     const [chatOpen, setChatOpen] = useState(false);
     const [showSocketInfo, setShowSocketInfo] = useState(false);
-
+    const [error, setError] = useState(null); // Added Error State
+    const handleError = (err) => {
+            console.error("Socket Error:", err);
+            setError(err.message || "Unknown error");
+            if (err.message && err.message.includes("ended")) {
+                alert(err.message);
+                navigate('/');
+            }
+        };
     // --- Socket Logic ---
     useEffect(() => {
         if (!socket) return;
+
+        socket.on('error', handleError);
 
         console.log(`Joinee joining session: ${session_id}`);
         socket.emit('join_session', { session_id });
@@ -80,6 +90,7 @@ const JoinView = () => {
             socket.off('chat_message');
             socket.off('session_ended');
             socket.off('kicked');
+            socket.off('error', handleError);
         };
     }, [socket, session_id, navigate]);
 
