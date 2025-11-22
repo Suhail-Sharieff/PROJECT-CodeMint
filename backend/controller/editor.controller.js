@@ -45,14 +45,11 @@ const submitCode = asyncHandler(async (req, res) => {
             return res.status(200).json(response.data);
         }
 
-        // SCENARIO 2: Running against a Test Question (Fetch DB Cases)
-        const [dbCases] = await db.execute('SELECT * FROM testcase WHERE question_id = ?', [question_id]);
+       const [dbCases] = await db.execute('SELECT * FROM testcase WHERE question_id = ?', [question_id]);
         
-        if (dbCases.length === 0) {
-            return res.status(200).json({ message: "No test cases found for this question." });
-        }
+        if (dbCases.length === 0) return res.status(200).json({ message: "No test cases found." });
 
-        // Run all cases in parallel
+        // Run all cases
         const promises = dbCases.map(async (testCase) => {
             try {
                 const judgeRes = await axios.post(`${JUDGE0}/submissions`, 
@@ -68,20 +65,21 @@ const submitCode = asyncHandler(async (req, res) => {
                 
                 const result = judgeRes.data;
 
-                // --- SANITIZATION LOGIC ---
-                // If the case is hidden, DO NOT send back input/expected output
+                // === SECURITY FIX: MASK HIDDEN RESULTS ===
                 if (testCase.is_hidden) {
                     return {
                         testCaseId: testCase.case_id,
-                        status: result.status, // Only Pass/Fail status
+                        status: result.status, // Only Pass/Fail status allowed
                         time: result.time,
                         memory: result.memory,
-                        isHidden: true, // Flag for frontend
-                        input: "Hidden Test Case",
-                        expected: "Hidden",
-                        stdout: "Hidden" // Hide actual output too
+                        isHidden: true, // Flag for frontend UI
+                        input: "Hidden Input", 
+                        expected: "Hidden Expected",
+                        stdout: "Hidden Output",
+                        stderr: null // Hide errors too
                     };
                 } else {
+                    // Return normal data for visible cases
                     return {
                         testCaseId: testCase.case_id,
                         status: result.status,
@@ -101,7 +99,7 @@ const submitCode = asyncHandler(async (req, res) => {
         });
 
         results = await Promise.all(promises);
-        return res.status(200).json(results); // Return array of results
+        return res.status(200).json(results);
 
     } catch (error) {
         return res.status(400).json(new ApiError(400, error.message));

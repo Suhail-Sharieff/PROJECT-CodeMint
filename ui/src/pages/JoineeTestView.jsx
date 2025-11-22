@@ -199,7 +199,7 @@ const JoineeTestView = () => {
     if (!testData) return (
         <div className="h-screen flex flex-col items-center justify-center bg-[#0D1117] text-white">
             <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-emerald-500 mb-4"></div>
-            <p>Loading Exam Data...</p>
+            <p>Loading Exam Data...If loadin persists for long, pls refresh the page again...</p>
         </div>
     );
 
@@ -220,7 +220,7 @@ const JoineeTestView = () => {
     const activeQ = testData.questions[activeQIndex];
     const currentQuestionTestCases = testData.testCases
         .filter(tc => tc.question_id === activeQ.question_id)
-        .map(tc => ({ id: tc.case_id, input: tc.stdin, expected: tc.expected_output }));
+        .map(tc => ({ id: tc.case_id, input: tc.stdin, expected: tc.expected_output, is_hidden:tc.is_hidden }));
 
     return (
         <div className="h-screen bg-[#0D1117] text-gray-300 flex flex-col overflow-hidden font-sans">
@@ -272,6 +272,7 @@ const JoineeTestView = () => {
                         onChange={handleCodeUpdate}
                         onLanguageChange={(l) => setCurrentLang(l)}
                         initialTestCases={currentQuestionTestCases}
+                        readOnly={false} 
                     />
                 </div>
             </div>

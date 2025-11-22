@@ -322,13 +322,6 @@ class SocketManager {
 
                     // Sanitize Logic
                     testCases = cases.map(tc => {
-                        if (role === 'joinee' && tc.is_hidden) {
-                            return {
-                                ...tc,
-                                stdin: "Hidden Case",          // Mask Input
-                                expected_output: "Hidden Output" // Mask Output
-                            };
-                        }
                         return tc;
                     });
                 }
