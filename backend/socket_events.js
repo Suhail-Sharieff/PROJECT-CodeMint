@@ -268,12 +268,12 @@ class SocketManager {
             this.io.to(test_id).emit('joinee_left', user_id_to_kick);
         });
         // --- 1. Create & Join Logic ---
-        socket.on('create_test', async ({ duration }) => {
+        socket.on('create_test', async ({ duration ,title}) => {
             const test_id = uuidv4();
             // Default to 60 if not provided, ensure it is INT
             const finalDuration = parseInt(duration) || 60;
 
-            await createTest(user_id, test_id, finalDuration);
+            await createTest(user_id, test_id, finalDuration,title);
             await joinTest(user_id, test_id);
 
             socket.emit('test_created', test_id);

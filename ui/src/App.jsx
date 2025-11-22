@@ -17,6 +17,8 @@ import JoinView from './pages/JoineeView';
 import SoloEditor from './components/SoloEditor';
 import HostTestView from './pages/HostTestView';
 import JoineeTestView from './pages/JoineeTestView';
+import MyTests from './pages/MyTests';
+import TestDetailsPage from './pages/TestDetails';
 
 function App() {
   const { user, isLoading } = useAuth();
@@ -49,9 +51,9 @@ function App() {
        <Route path="/hostView/:session_id" element={<HostView />} />
        <Route path="/joinView/:session_id" element={<JoinView />} />
        <Route path="/hostTestView/:test_id" element={<HostTestView />} />
-          <Route path="/joineeTestView/:test_id" element={<JoineeTestView />} />
-          
-        
+        <Route path="/joineeTestView/:test_id" element={<JoineeTestView />} />
+        <Route path="/myTests" element={<MyTests />} />
+        <Route path="/test-details/:test_id" element={<TestDetailsPage />} />
       </Routes>
     </Router>
   );

@@ -68,8 +68,11 @@ const HomePage = () => {
     const duration = parseInt(durationInput);
     if (isNaN(duration) || duration <= 0) return alert("Invalid duration");
 
+    const title=prompt("Enter the title for your test:")
+    if(title===null) return alert("Please enter title!")
+
     // Send as Object { duration: 60 }
-    socket.emit('create_test', { duration });
+    socket.emit('create_test', { duration ,title});
   };
 
   const handleJoinTest = (e) => {
