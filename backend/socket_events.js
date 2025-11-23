@@ -11,9 +11,15 @@ class SocketManager {
     }
 
     async initialize(server) {
+        const allowedOrigins = (process.env.CORS_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean);
+
         this.io = new Server(server, {
             cors: {
-                origin: process.env.CORS_ORIGIN || "http://localhost:3000",
+                origin: (origin, cb) => {
+                    if (!origin) return cb(null, true);
+                    if (allowedOrigins.length === 0 || allowedOrigins.includes(origin)) return cb(null, true);
+                    cb(new Error('Not allowed by CORS'));
+                },
                 methods: ["GET", "POST"],
                 credentials: true
             }
@@ -463,9 +469,9 @@ class SocketManager {
         // New listener to broadcast score updates
         socket.on('score_update', ({ test_id, score }) => {
             // Broadcast to the room (so Host sees it in the sidebar)
-            socket.to(test_id).emit('participant_score_update', { 
-                userId: socket.user.user_id, 
-                score: score 
+            socket.to(test_id).emit('participant_score_update', {
+                userId: socket.user.user_id,
+                score: score
             });
         });
     }

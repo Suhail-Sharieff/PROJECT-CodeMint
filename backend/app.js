@@ -7,16 +7,30 @@ import cors from "cors"
 const app = express()
 
 
-app.use(
-    cors({
-        origin: process.env.CORS_ORIGIN || "http://localhost:3000", // Default to frontend port for development
-        credentials: true, // THIS IS CRITICAL for cookies to work
-        methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-        allowedHeaders: ["Content-Type", "Authorization"],
-        preflightContinue: false,
-        optionsSuccessStatus: 204
-    })
-)
+// at top of file already: import cors from "cors"
+const allowedOrigins = (process.env.CORS_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean);
+
+app.use(cors({
+  origin: (origin, callback) => {
+    // allow non-browser tools (curl, server->server) when origin is undefined
+    if (!origin) return callback(null, true);
+
+    if (allowedOrigins.length === 0) {
+      // if no list provided, be permissive for dev only (optional)
+      return callback(null, true);
+    }
+
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+
+    // otherwise reject
+    return callback(new Error('CORS policy: origin not allowed'), false);
+  },
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"]
+}));
 
 
 //Allow json data transfer within app
