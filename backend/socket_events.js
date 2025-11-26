@@ -741,7 +741,7 @@ async function setupTestEvents(socket,io) {
         const [check] = await db.execute('SELECT host_id FROM test WHERE test_id=?', [test_id]);
         if (check[0].host_id !== user_id) return;
 
-        await db.execute('DELETE FROM test_participant WHERE test_id=? AND user_id=?', [test_id, user_id_to_kick]);
+        await db.execute('update test_participant set status=? WHERE test_id=? AND user_id=?', ["finished",test_id, user_id_to_kick]);
 
         // Find socket and force kick
         const [u] = await db.execute('SELECT socket_id FROM user WHERE user_id=?', [user_id_to_kick]);
