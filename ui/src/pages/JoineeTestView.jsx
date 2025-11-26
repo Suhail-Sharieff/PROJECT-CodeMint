@@ -55,6 +55,7 @@ const JoineeTestView = () => {
 
         socket.on('test_state', handleTestState);
         socket.on('test_started', handleTestStarted);
+        socket.on('test_ended', ()=>{socket.emit('submit_test', { test_id });alert("The test has been ended by host, your submission will be recorded!");navigate("/")});
         socket.on('kicked', () => { alert("You were removed."); navigate('/'); });
         socket.on('test_submitted', () => { alert("Submitted!"); navigate('/'); });
         socket.on('error', handleError);
