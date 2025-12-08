@@ -135,6 +135,7 @@ CREATE TABLE IF NOT EXISTS test_submissions (
     code MEDIUMTEXT,
     language VARCHAR(50) DEFAULT 'javascript',
     last_updated DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    score INT DEFAULT 0,
     PRIMARY KEY (test_id, question_id, user_id),
     FOREIGN KEY (test_id) REFERENCES test(test_id) ON DELETE CASCADE,
     FOREIGN KEY (question_id) REFERENCES question(question_id) ON DELETE CASCADE,

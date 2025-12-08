@@ -115,8 +115,11 @@ const submitCode = asyncHandler(async (req, res) => {
         results = await Promise.all(promises);
 
         // 3. Update Score in DB (Logic: Keep Highest Score)
-        let finalScore = 0; // Variable to hold the calculated score
+        // ... (inside submitCode, after results = await Promise.all(promises)) ...
 
+        let finalTotalScore = 0; // This will return the TOTAL test score
+
+        // 3. Update Score Logic
         if (user_id) {
             const [qRows] = await db.execute('SELECT test_id FROM question WHERE question_id=?', [question_id]);
             
@@ -124,34 +127,57 @@ const submitCode = asyncHandler(async (req, res) => {
                 const test_id = qRows[0].test_id;
                 const totalCases = dbCases.length;
 
-                // Calculate Score
+                // A. Calculate Score for THIS Question
+                let questionScore = 0;
                 if (totalCases > 0) {
-                    finalScore = Math.round((passedCount / totalCases) * 100);
+                    questionScore = Math.round((passedCount / totalCases) * 100);
                 }
 
-                // Update DB
+                // B. Save this Question's Score to 'test_submissions'
+                // We use GREATEST here to ensure we don't overwrite a high score with a low one 
+                // if they retry the same question and fail.
+                
+                // Note: We also save the code here to ensure persistence
+                await db.execute(`
+                    INSERT INTO test_submissions (test_id, question_id, user_id, code, language, score)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    ON DUPLICATE KEY UPDATE 
+                        code = VALUES(code),
+                        language = VALUES(language),
+                        score = GREATEST(score, VALUES(score)), 
+                        last_updated = NOW()
+                `, [test_id, question_id, user_id, source_code, language_id, questionScore]);
+
+                // C. Calculate TOTAL Score (Sum of all questions for this test)
+                const [sumRows] = await db.execute(`
+                    SELECT SUM(score) as total_score 
+                    FROM test_submissions 
+                    WHERE test_id = ? AND user_id = ?
+                `, [test_id, user_id]);
+
+                finalTotalScore = parseInt(sumRows[0].total_score) || 0;
+
+                // D. Update the Main Participant Table with the SUM
                 await db.execute(`
                     UPDATE test_participant 
-                    SET score = GREATEST(score, ?) 
+                    SET score = ? 
                     WHERE test_id = ? AND user_id = ?
-                `, [finalScore, test_id, user_id]);
+                `, [finalTotalScore, test_id, user_id]);
             }
-
-            console.log(`submission_score of ${user_id}:${req.user.email} = ${finalScore}. Verdict: ${(finalScore===100)?"ALL PASSED":"FAILED"}`);
             
-
+            console.log(`User ${user_id} - Question Score: ${Math.round((passedCount/dbCases.length)*100)}, Total Test Score: ${finalTotalScore}`);
         }
         
-        // console.log('result', results);
-        
-        // FIX: Return the score in the response so frontend knows it!
+        // Return results AND the new Total Score
         return res.status(200).json({
             results: results,
-            score: finalScore
+            score: finalTotalScore // Frontend can now update the total score display
         });
 
     } catch (error) {
-        return res.status(400).json(new ApiError(400, error.message));
+        console.log(error);
+        
+        return res.status(400).json(new ApiError(400, error));
     }
 });
 export { getLanguages, submitCode };

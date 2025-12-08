@@ -58,15 +58,33 @@ const getTestAnalysis=asyncHandler(
         try {
             const {test_id}=req.query
             if(!test_id) throw new ApiError(400,`Test_id not provided in params for its analysis!`)
-            const query=`
-                        with cte as 
-                        (select 
-                        x.test_id,x.user_id,x.role,x.status as user_status,x.joined_at,x.score,y.host_id,y.title,y.status as test_status,y.created_at,y.duration,y.start_time
-                        from test_participant x left join test y on
-                        x.test_id=y.test_id where x.test_id=?
-                        and x.user_id!=y.host_id)
-                        select *,timediff(time(x.last_updated),time(cte.start_time)) as time_taken_to_solve from cte left join test_submissions x  on cte.test_id=x.test_id and cte.user_id=x.user_id
-                        order by cte.score,time_taken_to_solve`
+            const query = `
+            WITH cte AS (
+                SELECT 
+                    x.test_id, x.user_id, z.name,z.email,x.role, x.status AS user_status, x.joined_at, x.score,
+                    y.host_id, y.title, y.status AS test_status, y.created_at, y.duration, y.start_time
+                FROM test_participant x 
+                LEFT JOIN test y ON x.test_id = y.test_id 
+                LEFT JOIN user z ON x.user_id=z.user_id
+                WHERE x.test_id = ? AND x.user_id != y.host_id
+            )
+            SELECT 
+                cte.test_id, cte.user_id, cte.name,cte.email,cte.role, cte.user_status, cte.joined_at, cte.score, 
+                cte.title, cte.duration, cte.start_time,
+                JSON_ARRAYAGG(
+                    JSON_OBJECT(
+                        'question_id', x.question_id,
+                        'code', x.code,
+                        'language', x.language,
+                        'last_updated', x.last_updated,
+                        'time_taken_to_solve', TIMEDIFF(TIME(x.last_updated), TIME(cte.start_time))
+                    )
+                ) as submissions
+            FROM cte 
+            LEFT JOIN test_submissions x ON cte.test_id = x.test_id AND cte.user_id = x.user_id
+            GROUP BY cte.test_id, cte.user_id, cte.role, cte.user_status, cte.joined_at, cte.score, cte.title, cte.duration, cte.start_time
+            ORDER BY cte.score DESC;
+`;
 
             const [rows]=await db.execute(query,[test_id])
             return res.status(200).json(new ApiResponse(200,rows,`Fetched test anaysis of test_id=${test_id}`))
@@ -74,7 +92,45 @@ const getTestAnalysis=asyncHandler(
             return res.status(400).json(new ApiError(400,error.message)) 
         }
     }
-)
+);
+/**sample response of abve query:
+ * {
+    "statusCode": 200,
+    "data": [
+        {
+            "test_id": "5fea893e-b002-4519-ae7f-cf5c8ae2cc5a",
+            "user_id": 2,
+            "role": "joinee",
+            "user_status": "finished",
+            "joined_at": "2025-12-08T15:42:31.000Z",
+            "score": 200,
+            "title": "Tit1",
+            "duration": 12,
+            "start_time": "2025-12-08T15:39:22.000Z",
+            "submissions": [
+                {
+                    "code": "",
+                    "language": "javascript",
+                    "question_id": 7,
+                    "last_updated": "2025-12-08 21:15:28.000000",
+                    "time_taken_to_solve": "00:06:06.000000"
+                },
+                {
+                    "code": "// Java\nimport java.util.Scanner;\n\npublic class Main {\n    public static void main(String[] args) {\n        Scanner scanner = new Scanner(System.in);\n        int ans=-1;\n        int x=scanner.nextInt();\n        if((x&1)==1) ans=x+1;\n        else ans=x+2;\n        System.out.println(ans);\n    }\n}",
+                    "language": "62",
+                    "question_id": 6,
+                    "last_updated": "2025-12-08 21:16:43.000000",
+                    "time_taken_to_solve": "00:07:21.000000"
+                }
+            ]
+        }
+    ],
+    "message": "Fetched test anaysis of test_id=5fea893e-b002-4519-ae7f-cf5c8ae2cc5a",
+    "success": true
+}
+ * 
+ * 
+ */
 const getTestHostID=asyncHandler(
     async(req,res)=>{
         try{
