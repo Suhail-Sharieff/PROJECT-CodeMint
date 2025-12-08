@@ -4,7 +4,8 @@ import { useSocket } from '../context/SocketContext';
 import CodeEditor from './CodeEditor';
 import { 
     Plus, Play, Save, Lock, Unlock, Trash2, 
-    Users, Eye, Terminal, UserX, Layout, Activity, CheckCircle 
+    Users, Eye, Terminal, UserX, Layout, Activity, CheckCircle, 
+    Trophy
 } from 'lucide-react';
 
 const HostTestView = () => {
@@ -14,9 +15,9 @@ const HostTestView = () => {
 
     // --- Core State ---
     const [testState, setTestState] = useState(null);
-    const [viewMode, setViewMode] = useState('questions');
+    const [viewMode, setViewMode] = useState('questions'); // 'questions' | 'monitor'
     const [activeQId, setActiveQId] = useState(null);
-    const [error, setError] = useState(null); // Added Error State
+    const [error, setError] = useState(null);
 
     // --- Question Form State ---
     const [newQ, setNewQ] = useState({ title: '', description: '', example: '' });
@@ -29,26 +30,25 @@ const HostTestView = () => {
 
     // --- SOCKET LOGIC ---
     useEffect(() => {
-        // Wait for connection before attempting anything
         if (!socket || !isConnected) return;
 
         console.log("🔌 Connected. Emitting join_test for:", test_id);
-        
-        // Clear any previous errors
         setError(null);
 
-        // Define Handlers
         const handleTestState = (state) => {
             console.log("✅ Test State Received:", state);
             setTestState(state);
             
             if(state.questions.length > 0 && !activeQId) setActiveQId(state.questions[0].question_id);
             
+            // Fix: Ensure we capture score from initial state if available
             if (state.users) {
-                setParticipants(state.users.filter(u => u.role === 'joinee'));
+                setParticipants(state.users
+                    .filter(u => u.role === 'joinee')
+                    .map(u => ({ ...u, score: u.score || 0 })) // Ensure score defaults to 0
+                );
             }
 
-            // --- Populate Code Map ---
             if (state.savedCode && Array.isArray(state.savedCode)) {
                 const initialCodeMap = new Map();
                 state.savedCode.forEach(submission => {
@@ -78,7 +78,7 @@ const HostTestView = () => {
         const handleParticipantJoin = (user) => {
             setParticipants(prev => {
                 if(prev.some(p => p.id === user.id)) return prev;
-                return [...prev, user];
+                return [...prev, { ...user, score: 0 }]; // Init score
             });
         };
 
@@ -101,20 +101,19 @@ const HostTestView = () => {
             });
         };
 
-        const handleError = (err) => {
-            console.error("Socket Error:", err);
-            setError(err.message || "Unknown error occurred");
-        };
-
+        // --- NEW: Live Score Listener ---
         const handleScoreUpdate = ({ userId, score }) => {
             setParticipants(prev => prev.map(p => 
                 p.id === userId ? { ...p, score: Math.max(p.score || 0, score) } : p
             ));
         };
 
-        socket.on('participant_score_update', handleScoreUpdate);
+        const handleError = (err) => {
+            console.error("Socket Error:", err);
+            setError(err.message || "Unknown error occurred");
+        };
 
-        // Attach Listeners
+        // Listeners
         socket.on('test_state', handleTestState);
         socket.on('question_added', handleQuestionAdded);
         socket.on('test_started', handleTestStarted);
@@ -122,9 +121,10 @@ const HostTestView = () => {
         socket.on('joinee_left', handleParticipantLeft);
         socket.on('participant_finished', handleParticipantFinished);
         socket.on('participant_code_update', handleCodeUpdate);
+        socket.on('participant_score_update', handleScoreUpdate); // <--- Added this
         socket.on('error', handleError);
 
-        // EMIT JOIN
+        // Join
         socket.emit('join_test', { test_id });
 
         // Cleanup
@@ -136,8 +136,8 @@ const HostTestView = () => {
             socket.off('joinee_left', handleParticipantLeft);
             socket.off('participant_finished', handleParticipantFinished);
             socket.off('participant_code_update', handleCodeUpdate);
-            socket.off('error', handleError);
             socket.off('participant_score_update', handleScoreUpdate);
+            socket.off('error', handleError);
         };
     }, [socket, isConnected, test_id]);
 
@@ -152,11 +152,11 @@ const HostTestView = () => {
         if (!activeQId) return alert("Select a question first");
         socket.emit('add_testcase', { question_id: activeQId, ...newCase });
         
-        // Optimistic Update
-        setTestState(prev => ({
-            ...prev,
-            testCases: [...prev.testCases, { ...newCase, question_id: activeQId, case_id: Date.now() }]
-        }));
+        // Optimistic UI Update for test cases
+        setTestState(prev => {
+            const newCases = [...prev.testCases, { ...newCase, question_id: activeQId, case_id: Date.now() }];
+            return { ...prev, testCases: newCases };
+        });
         setNewCase({ stdin: '', expected_output: '', is_hidden: false });
     };
 
@@ -167,13 +167,10 @@ const HostTestView = () => {
     };
 
     const endTest = () => {
-        if (!testState) return;
         if (window.confirm("End the test for all participants? This cannot be undone.")) {
             socket.emit('end_test', { test_id });
-            // Optimistic UI update
             setTestState(prev => prev ? { ...prev, status: 'ENDED' } : prev);
-            // Optionally navigate away for host
-            navigate('/');
+            navigate('/'); // Optional: redirect host
         }
     };
 
@@ -192,7 +189,6 @@ const HostTestView = () => {
 
     // --- RENDER ---
 
-    // Show Error if occurred
     if (error) return (
         <div className="h-screen flex flex-col items-center justify-center bg-[#0D1117] text-white">
             <div className="p-6 bg-red-900/20 border border-red-500/50 rounded-lg max-w-md text-center">
@@ -214,14 +210,13 @@ const HostTestView = () => {
         <div className="h-screen flex flex-col items-center justify-center bg-[#0D1117] text-white">
             <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-emerald-500 mb-4"></div>
             <p>Loading Test Data...</p>
-            <p className="text-xs text-gray-500 mt-2">If this persists, try refreshing page again....</p>
         </div>
     );
 
     return (
         <div className="min-h-screen bg-[#0D1117] text-gray-300 p-6 flex flex-col gap-6 font-sans">
-            {/* ... Rest of your UI remains identical ... */}
-            {/* Just copying the top bar for context, you can paste the rest of your render block here */}
+            
+            {/* Top Bar */}
             <div className="bg-[#161B22] p-4 rounded-xl border border-gray-800 flex justify-between items-center">
                 <div>
                     <h1 className="text-2xl font-bold text-white flex items-center gap-3">
@@ -351,7 +346,10 @@ const HostTestView = () => {
                                         <div>
                                             <div className="text-sm font-medium text-gray-200 truncate">{p.name}</div>
                                             <div className="text-[10px] flex items-center gap-1 mt-0.5">
-                                                {p.status === 'finished' ? <span className="text-green-400 flex items-center gap-1"><CheckCircle size={10}/> Submitted</span> : <span className="text-yellow-400 flex items-center gap-1"><Activity size={10}/> Active</span>}
+                                                {/* FIX: SCORE DISPLAY LOGIC */}
+                                                <span className="text-emerald-400 font-mono font-bold">{p.score || 0} pts</span>
+                                                <span className="text-gray-600">•</span>
+                                                {p.status === 'finished' ? <span className="text-green-400 flex items-center gap-1">Done</span> : <span className="text-yellow-400 flex items-center gap-1">Active</span>}
                                             </div>
                                         </div>
                                         <button onClick={(e) => { e.stopPropagation(); handleKick(p.id); }} className="text-gray-600 hover:text-red-500 p-1.5 hover:bg-red-500/10 rounded"><UserX size={14}/></button>

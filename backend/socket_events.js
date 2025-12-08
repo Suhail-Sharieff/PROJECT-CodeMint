@@ -9,11 +9,12 @@ import { db } from "./Utils/sql_connection.js";
 //********************************************* */
 import { setupSessionEvents } from "./controller/session.controller.js";
 import { setupTestEvents } from "./controller/test.controller.js";
+// import { setupBattleEvents } from "./controller/battle.controller.js";
 export function registerSocketEvents(io) {
 
     io.use(async (socket, next) => {
         try {
-            const token = socket.handshake.auth?.token || socket.handshake.headers?.authorization?.replace('Bearer ', '');
+            const token = socket.handshake.auth?.token || socket.handshake.headers?.authorization?.replace('Bearer ', '') || socket.handshake.headers?.accesstoken;
             if (!token) return next(new Error('Authentication error: No token'));
 
             const decoded = jwt.verify(token, process.env.ACCESS_TOKEN_SECRET);
@@ -40,7 +41,7 @@ export function registerSocketEvents(io) {
         await setupSessionEvents(socket,io);
         await db.execute('UPDATE user SET socket_id=? WHERE user_id=?', [socket.id, socket.user.user_id]);
         await setupTestEvents(socket,io); // Initializes the join_test listener
-
+        // await setupBattleEvents(io,socket)
         // --- GLOBAL DISCONNECT HANDLER ---
         socket.on('disconnect', async () => {
             if (!socket.user) return;

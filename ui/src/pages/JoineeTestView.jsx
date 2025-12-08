@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react'; // <--- 1. Import useMemo
+import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useSocket } from '../context/SocketContext';
 import CodeEditor from './CodeEditor';
@@ -103,6 +103,17 @@ const JoineeTestView = () => {
         }
     };
 
+    // --- NEW: Handle Score Logic ---
+    const handleScoreUpdate = (newScore) => {
+        if (socket) {
+            // Emit directly to backend so Host gets notified
+            socket.emit('score_update', { 
+                test_id, 
+                score: newScore 
+            });
+        }
+    };
+
     const switchQuestion = (index) => {
         setActiveQIndex(index);
         if (testData?.questions[index]) {
@@ -117,8 +128,7 @@ const JoineeTestView = () => {
         if(window.confirm("Submit test?")) socket.emit('submit_test', { test_id });
     };
 
-    // --- MEMOIZED TEST CASES (THE FIX) ---
-    // This prevents the array reference from changing on every timer tick
+    // --- MEMOIZED TEST CASES ---
     const activeQ = testData?.questions[activeQIndex];
     
     const currentQuestionTestCases = useMemo(() => {
@@ -133,8 +143,6 @@ const JoineeTestView = () => {
                 is_hidden: tc.is_hidden 
             }));
     }, [testData, activeQ]); 
-    // Only re-runs if testData (loaded once) or activeQ (user switches question) changes.
-    // It ignores 'timer' updates.
 
     // --- RENDER ---
     if (error) return <div className="h-screen flex flex-col items-center justify-center bg-[#0D1117] text-red-400 font-bold">{error} <button onClick={() => navigate('/')} className="mt-4 text-sm bg-gray-800 p-2 rounded">Go Home</button></div>;
@@ -173,7 +181,8 @@ const JoineeTestView = () => {
                         questionId={activeQ.question_id}
                         onChange={handleCodeUpdate}
                         onLanguageChange={setCurrentLang}
-                        initialTestCases={currentQuestionTestCases} // <--- Now Stable
+                        initialTestCases={currentQuestionTestCases}
+                        onScoreUpdate={handleScoreUpdate} // <--- PASSING THE HANDLER
                     />
                 </div>
             </div>

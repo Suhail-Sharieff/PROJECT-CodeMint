@@ -141,6 +141,55 @@ CREATE TABLE IF NOT EXISTS test_submissions (
     FOREIGN KEY (user_id) REFERENCES user(user_id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS battle(
+    battle_id VARCHAR(50) PRIMARY KEY,
+    host_id INT,
+    title VARCHAR(100) DEFAULT 'Untitled Test',
+    status ENUM('DRAFT', 'LIVE', 'ENDED') DEFAULT 'DRAFT',
+    created_at DATETIME DEFAULT NOW(),
+    duration INT DEFAULT 60, -- Duration in minutes
+    start_time DATETIME, 
+    FOREIGN KEY(host_id) REFERENCES user(user_id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS battle_question(
+    battle_question_id INT PRIMARY KEY AUTO_INCREMENT,
+    battle_id VARCHAR(50),
+    title VARCHAR(100),
+    description TEXT,
+    example TEXT,
+    FOREIGN KEY(battle_id) REFERENCES battle(battle_id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS battlecase(
+    case_id INT PRIMARY KEY AUTO_INCREMENT,
+    battle_question_id INT,
+    stdin TEXT,
+    expected_output TEXT,
+    is_hidden BOOLEAN DEFAULT FALSE,
+    FOREIGN KEY(battle_question_id) REFERENCES battle_question(battle_question_id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS battle_participant (
+    battle_id VARCHAR(50),
+    user_id INT,
+    role ENUM('host', 'joinee') DEFAULT 'joinee',
+    status ENUM('active', 'finished') DEFAULT 'active', -- NEW COLUMN
+    joined_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    score INT DEFAULT 0,
+    PRIMARY KEY (battle_id, user_id),
+    FOREIGN KEY (battle_id) REFERENCES battle(battle_id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES user(user_id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS battle_submissions (
+    battle_id VARCHAR(50),
+    battle_question_id INT,
+    user_id INT,
+    code MEDIUMTEXT,
+    language VARCHAR(50) DEFAULT 'javascript',
+    last_updated DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (battle_id, battle_question_id, user_id),
+    FOREIGN KEY (battle_id) REFERENCES battle(battle_id) ON DELETE CASCADE,
+    FOREIGN KEY (battle_question_id) REFERENCES battle_question(battle_question_id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES user(user_id) ON DELETE CASCADE
+);
 `;
 
 export { init_query };

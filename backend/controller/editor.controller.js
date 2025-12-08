@@ -136,9 +136,13 @@ const submitCode = asyncHandler(async (req, res) => {
                     WHERE test_id = ? AND user_id = ?
                 `, [finalScore, test_id, user_id]);
             }
+
+            console.log(`submission_score of ${user_id}:${req.user.email} = ${finalScore}. Verdict: ${(finalScore===100)?"ALL PASSED":"FAILED"}`);
+            
+
         }
         
-        console.log('result', results);
+        // console.log('result', results);
         
         // FIX: Return the score in the response so frontend knows it!
         return res.status(200).json({
