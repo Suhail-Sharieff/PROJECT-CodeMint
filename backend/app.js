@@ -81,7 +81,10 @@ app.use('/session',sessionRouter)
 import { editorRoute } from "./routes/editor.routes.js"
 app.use('/editor',editorRoute)
 import { testRouter } from "./routes/test.routes.js"
-app.use('/test',testRouter)
+app.get('/test',testRouter)
+
+import { testApi } from "./Utils/kafka_connection.js";
+app.use('/suhail',testApi)
 
 import { ApiError } from "./Utils/Api_Error.utils.js"
 app.use((err, req, res, next) => {

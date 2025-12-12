@@ -4,6 +4,7 @@ import { init_query } from "./__init__.js";
 import { createServer } from "http";
 import dotenv from "dotenv";
 import { Server } from "socket.io";
+import { connectKafka } from "./Utils/kafka_connection.js";
 
 dotenv.config();
 
@@ -50,7 +51,7 @@ const startServer = async () => {
     validateEnv();
     await connect_To_DB();
     await initDB(init_query);
-
+    await connectKafka()
     const server = createServer(app);
     const allowedOrigins = (process.env.CORS_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean);
     const io = new Server(server, {
