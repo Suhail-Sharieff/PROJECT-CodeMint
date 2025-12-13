@@ -1,16 +1,39 @@
 import { db } from "./sql_connection.js";
 
-const handleCodeUpdate = async (payload) => {
+const handleDbQuery = async (payload) => {
     try {
-        const eventName="code_update"
-        const { query, params, desc } = payload;
-        console.log(`📥 KAFKA consumed event=[${eventName}] desc_of_event:[${desc}]`);
+        const eventName=Events.DB_QUERY.type
+        const { query, params} = payload;
         await db.execute(query, params); 
     } catch (error) {
-        console.log(`Error in handleCodeUpdate: ${error.message}`);
+        console.error(`Error in handleDbQuery: ${error.message}`);
     }
 };
 
-export const eventRegistry = {
-    "code_update": handleCodeUpdate,
+
+export class Topics{
+    static DB_TOPIC="db_topic"
+}
+export const Events = {
+    DB_QUERY: {
+        type: "db_query",
+        handler: handleDbQuery
+    }
 };
+
+
+
+
+
+// Usage: await produceEvent(Events.DB_QUERY.type, { type: Events.DB_QUERY.type, ... })
+
+/**
+ await produceEvent("code_topic", {
+        type: "code_update", 
+        payload: { 
+            desc: "Making bulk inserts",
+            query: "INSERT INTO messages(session_id, user_id, message) VALUES (?, ?, ?)",
+            params: [2, 1, "Hello World"]
+        }
+    });
+ */

@@ -60,6 +60,8 @@ const joinSession =
 
 import { v4 as uuidv4 } from "uuid";
 import { Server,Socket } from "socket.io"
+import { produceEvent } from "../Utils/kafka_connection.js"
+import { Events, Topics } from "../Utils/kafka_events.js"
 /**
 * @param {Server} io
 * @param {Socket} socket
@@ -155,14 +157,32 @@ async function setupSessionEvents(socket,io) {
     // --- 3. HOST: Code Change (Broadcasts to everyone) ---
     socket.on('host_code_change', async ({ session_id, new_code }) => {
         // Update DB so new joiners get latest code
-        await db.execute('UPDATE session_codes SET code=? WHERE session_id=? AND user_id=?', [new_code, session_id, user_id]);
+        const query='UPDATE session_codes SET code=? WHERE session_id=? AND user_id=?'
+        // await db.execute(query, [new_code, session_id, user_id]);
+        await produceEvent(Topics.DB_TOPIC,{
+            type:Events.DB_QUERY.type,
+            payload:{
+                desc:`host_code_change in session_id=${session_id} user_id=${user_id}`,
+                query:query,
+                params:[new_code, session_id, user_id]
+            }
+        })
         // Broadcast to room (excluding sender)
         socket.to(session_id).emit('host_code_update', new_code);
     });
 
     // --- 4. HOST: Language Change ---
     socket.on('host_language_change', async ({ session_id, language }) => {
-        await db.execute('UPDATE session_codes SET code_lang=? WHERE session_id=? AND user_id=?', [language, session_id, user_id]);
+        const query='UPDATE session_codes SET code_lang=? WHERE session_id=? AND user_id=?'
+        // await db.execute(query, [language, session_id, user_id]);
+        await produceEvent(Topics.DB_TOPIC,{
+            type:Events.DB_QUERY.type,
+            payload:{
+                desc:`host_language_change in session_id=${session_id} user_id=${user_id}`,
+                query:query,
+                params: [language, session_id, user_id]
+            }
+        })
         socket.to(session_id).emit('language_change', language);
     });
 
@@ -171,12 +191,24 @@ async function setupSessionEvents(socket,io) {
         // Update Joinee's specific code in DB
         // Upsert logic (Insert if not exists, update if exists)
         const [existing] = await db.execute('SELECT * FROM session_codes WHERE session_id=? AND user_id=?', [session_id, user_id]);
+        let query;
+        let params;
         if (existing.length > 0) {
-            await db.execute('UPDATE session_codes SET code=? WHERE session_id=? AND user_id=?', [code, session_id, user_id]);
+            query='UPDATE session_codes SET code=? WHERE session_id=? AND user_id=?'
+            params=[code, session_id, user_id]
         } else {
-            await db.execute('INSERT INTO session_codes(session_id, user_id, code, code_lang) VALUES(?,?,?,?)', [session_id, user_id, code, 'javascript']);
+            query='INSERT INTO session_codes(session_id, user_id, code, code_lang) VALUES(?,?,?,?)'
+            params=[session_id, user_id, code, 'javascript']
         }
-
+        // await db.execute(query,params );
+        await produceEvent(Topics.DB_TOPIC,{
+            type:Events.DB_QUERY.type,
+            payload:{
+                desc:`joinee_code_change in session_id=${session_id} user_id=${user_id}`,
+                query:query,
+                params: params
+            }
+        })
         // Emit ONLY to Host (Assuming we store host socket id, or just broadcast to room and frontend filters)
         // Easier approach: Broadcast to room, Frontend logic filters it out if not Host
         socket.to(session_id).emit('joinee_code_update', { joineeId: user_id, code: code });
@@ -184,7 +216,16 @@ async function setupSessionEvents(socket,io) {
 
     // --- 6. COMMON: Chat ---
     socket.on('send_message', async ({ session_id, message }) => {
-        await db.execute('INSERT INTO messages(session_id, user_id, message) VALUES(?,?,?)', [session_id, user_id, message]);
+        const query='INSERT INTO messages(session_id, user_id, message) VALUES(?,?,?)'
+        // await db.execute(query, [session_id, user_id, message]);
+        await produceEvent(Topics.DB_TOPIC,{
+            type:Events.DB_QUERY.type,
+            payload:{
+                desc:`send_message in session_id=${session_id} user_id=${user_id}`,
+                query:query,
+                params: [session_id, user_id, message]
+            }
+        })
         const msgPayload = { message, sender: name, timestamp: new Date() };
         socket.to(session_id).emit('chat_message', msgPayload);
     });

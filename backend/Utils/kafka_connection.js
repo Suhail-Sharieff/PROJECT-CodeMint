@@ -1,8 +1,11 @@
 import { Kafka } from "kafkajs";
 import { asyncHandler } from "./AsyncHandler.utils.js";
-import { eventRegistry } from "./kafka_events.js";
+import { Events, Topics } from "./kafka_events.js";
+const eventRegistry = Object.fromEntries(
+    Object.entries(Events).map(([key, { type, handler }]) => [type, handler])
+);
 
-const topicsToCreate = ["code_topic"]; 
+const topicsToCreate=Object.values(Topics)
 
 const kafkaOrigin = process.env.KAFKA_ORIGIN;
 const rawBrokers = kafkaOrigin.split(',').map(broker => broker.trim()).filter(broker => broker);
@@ -85,8 +88,10 @@ export const startDynamicConsumer = async (topics) => {
                     const handler = eventRegistry[type];
 
                     if (handler) {
-                        console.log(`📤 KAFKA consumed from topic=[${topic}] event_type: [${type}]`);
+                        console.log("============================================");
+                        console.log(`📤 KAFKA consumed from topic=[${topic}] event_type: [${type}] desc_of_event: [${JSON.stringify(payload.desc)}]`);
                         await handler(payload);
+                        console.log("============================================");
                     } else {
                         console.warn(`⚠️ No handler found for event type: [${type}]`);
                     }
@@ -105,8 +110,8 @@ export const startDynamicConsumer = async (topics) => {
 import { ApiResponse } from "./Api_Response.utils.js";
 
 export const testApi = asyncHandler(async(req, res) => {
-    await produceEvent("code_topic", {
-        type: "code_update", 
+    await produceEvent(Topics.DB_TOPIC, {
+        type: Events.DB_QUERY.type, 
         payload: { 
             desc: "Making bulk inserts",
             query: "INSERT INTO messages(session_id, user_id, message) VALUES (?, ?, ?)",
