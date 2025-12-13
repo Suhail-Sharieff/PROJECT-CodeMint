@@ -115,7 +115,7 @@ export const testApi = asyncHandler(async(req, res) => {
         payload: { 
             desc: "Making bulk inserts",
             query: "INSERT INTO messages(session_id, user_id, message) VALUES (?, ?, ?)",
-            params: [2, 1, "Hello World"]
+            params: ["f9b794a2-4ff8-4f8c-8c06-9655c10b938e", 1, "Hello World"]
         }
     });
 
