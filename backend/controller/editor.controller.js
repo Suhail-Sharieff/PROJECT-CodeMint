@@ -2,6 +2,8 @@ import { ApiError } from "../Utils/Api_Error.utils.js";
 import { asyncHandler } from "../Utils/AsyncHandler.utils.js";
 import axios from "axios";
 import { db } from "../Utils/sql_connection.js"; // Import DB
+import { produceEvent } from "../Utils/kafka_connection.js";
+import { Events, Topics } from "../Utils/kafka_events.js";
 
 const JUDGE0 = process.env.JUDGE0_ORIGIN;
 
@@ -30,10 +32,10 @@ const constants_body = {
 
 const submitCode = asyncHandler(async (req, res) => {
     const { language_id, source_code, stdin, expected_output, question_id } = req.body;
-    
+
     // NOTE: Ensure your route middleware adds user info (verifyJWT)
     // If this endpoint is public, you'll need to pass user_id in body (less secure)
-    const user_id = req.user.user_id; 
+    const user_id = req.user.user_id;
 
     if (!language_id || !source_code) throw new ApiError(400, "language_id/source_code missing!");
 
@@ -42,7 +44,7 @@ const submitCode = asyncHandler(async (req, res) => {
 
         // --- SCENARIO 1: Custom Run (Not part of scoring) ---
         if (!question_id) {
-            const response = await axios.post(`${JUDGE0}/submissions`, 
+            const response = await axios.post(`${JUDGE0}/submissions`,
                 { language_id, source_code, stdin, expected_output, ...constants_body },
                 { params: { base64_encoded: false, wait: true } }
             );
@@ -52,33 +54,33 @@ const submitCode = asyncHandler(async (req, res) => {
         // --- SCENARIO 2: Test Submission (Scoring) ---
         // 1. Fetch Test Cases
         const [dbCases] = await db.execute('SELECT * FROM testcase WHERE question_id = ?', [question_id]);
-        
+
         if (dbCases.length === 0) return res.status(200).json({ message: "No test cases found." });
 
         // 2. Run All Cases
         let passedCount = 0;
-        
+
         const promises = dbCases.map(async (testCase) => {
             try {
-                const judgeRes = await axios.post(`${JUDGE0}/submissions`, 
-                    { 
-                        language_id, 
-                        source_code, 
-                        stdin: testCase.stdin, 
-                        expected_output: testCase.expected_output, 
-                        ...constants_body 
+                const judgeRes = await axios.post(`${JUDGE0}/submissions`,
+                    {
+                        language_id,
+                        source_code,
+                        stdin: testCase.stdin,
+                        expected_output: testCase.expected_output,
+                        ...constants_body
                     },
                     { params: { base64_encoded: false, wait: true } }
                 );
-                
+
                 const result = judgeRes.data;
-                
+
                 // Count Passes (Status ID 3 = Accepted)
                 if (result.status.id === 3) {
                     passedCount++;
                 }
 
-                
+
 
                 // Sanitize Hidden Cases
                 if (testCase.is_hidden) {
@@ -122,7 +124,7 @@ const submitCode = asyncHandler(async (req, res) => {
         // 3. Update Score Logic
         if (user_id) {
             const [qRows] = await db.execute('SELECT test_id FROM question WHERE question_id=?', [question_id]);
-            
+
             if (qRows.length > 0) {
                 const test_id = qRows[0].test_id;
                 const totalCases = dbCases.length;
@@ -136,7 +138,7 @@ const submitCode = asyncHandler(async (req, res) => {
                 // B. Save this Question's Score to 'test_submissions'
                 // We use GREATEST here to ensure we don't overwrite a high score with a low one 
                 // if they retry the same question and fail.
-                
+
                 // Note: We also save the code here to ensure persistence
                 await db.execute(`
                     INSERT INTO test_submissions (test_id, question_id, user_id, code, language, score)
@@ -158,16 +160,27 @@ const submitCode = asyncHandler(async (req, res) => {
                 finalTotalScore = parseInt(sumRows[0].total_score) || 0;
 
                 // D. Update the Main Participant Table with the SUM
-                await db.execute(`
-                    UPDATE test_participant 
-                    SET score = ? 
-                    WHERE test_id = ? AND user_id = ?
-                `, [finalTotalScore, test_id, user_id]);
+                // await db.execute(`
+                //     UPDATE test_participant 
+                //     SET score = ? 
+                //     WHERE test_id = ? AND user_id = ?
+                // `, [finalTotalScore, test_id, user_id]);
+                await produceEvent(Topics.DB_TOPIC, {
+                    type: Events.DB_QUERY.type,
+                    payload: {
+                        desc: `updating test_participant's score user_id=${user_id} test_id=${test_id}`,
+                        query: `
+                        UPDATE test_participant 
+                        SET score = ? 
+                        WHERE test_id = ? AND user_id = ?`,
+                        params:[finalTotalScore, test_id, user_id]
+                    }
+                })
             }
-            
-            console.log(`User ${user_id} - Question Score: ${Math.round((passedCount/dbCases.length)*100)}, Total Test Score: ${finalTotalScore}`);
+
+            console.log(`User ${user_id} - Question Score: ${Math.round((passedCount / dbCases.length) * 100)}, Total Test Score: ${finalTotalScore}`);
         }
-        
+
         // Return results AND the new Total Score
         return res.status(200).json({
             results: results,
@@ -176,7 +189,7 @@ const submitCode = asyncHandler(async (req, res) => {
 
     } catch (error) {
         console.log(error);
-        
+
         return res.status(400).json(new ApiError(400, error));
     }
 });

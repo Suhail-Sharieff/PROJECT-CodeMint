@@ -81,7 +81,7 @@ app.use('/session',sessionRouter)
 import { editorRoute } from "./routes/editor.routes.js"
 app.use('/editor',editorRoute)
 import { testRouter } from "./routes/test.routes.js"
-app.get('/test',testRouter)
+app.use('/test',testRouter)
 
 import { testApi } from "./Utils/kafka_connection.js";
 app.use('/suhail',testApi)

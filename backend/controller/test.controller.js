@@ -145,6 +145,8 @@ const getTestHostID=asyncHandler(
 )
 import { v4 as uuidv4 } from "uuid";
 import { Server,Socket } from "socket.io"
+import { produceEvent } from "../Utils/kafka_connection.js";
+import { Events, Topics } from "../Utils/kafka_events.js";
 /**
 * @param {Server} io
 * @param {Socket} socket
@@ -207,11 +209,19 @@ async function setupTestEvents(socket,io) {
             }
 
             // 3. Add Participant
-            await db.execute(
-                `INSERT INTO test_participant (test_id, user_id, role) VALUES (?, ?, ?) 
-                     ON DUPLICATE KEY UPDATE joined_at=NOW()`,
-                [test_id, user_id, role]
-            );
+            // await db.execute(
+            //     `INSERT INTO test_participant (test_id, user_id, role) VALUES (?, ?, ?) 
+            //          ON DUPLICATE KEY UPDATE joined_at=NOW()`,
+            //     [test_id, user_id, role]
+            // );
+            await produceEvent(Topics.DB_TOPIC,{
+                type:Events.DB_QUERY.type,
+                payload:{
+                    desc:`Inserting user_id=${user_id} into test_id=${test_id} as ${role}`,
+                    query:`INSERT INTO test_participant (test_id, user_id, role) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE joined_at=NOW()`,
+                    params:[test_id, user_id, role]
+                }
+            })
 
             // 4. Questions
             const [questions] = await db.execute('SELECT * FROM question WHERE test_id = ?', [test_id]);
@@ -284,10 +294,19 @@ async function setupTestEvents(socket,io) {
     });
 
     socket.on('add_testcase', async ({ question_id, stdin, expected_output, is_hidden }) => {
-        await db.execute(
-            'INSERT INTO testcase (question_id, stdin, expected_output, is_hidden) VALUES (?,?,?,?)',
-            [question_id, stdin, expected_output, is_hidden]
-        );
+        // await db.execute(
+        //     'INSERT INTO testcase (question_id, stdin, expected_output, is_hidden) VALUES (?,?,?,?)',
+        //     [question_id, stdin, expected_output, is_hidden]
+        // );
+        const query='INSERT INTO testcase (question_id, stdin, expected_output, is_hidden) VALUES (?,?,?,?)'
+        await produceEvent(Topics.DB_TOPIC,{
+            type:Events.DB_QUERY.type,
+            payload:{
+                desc:`add_testcase event`,
+                query:query,
+                params:[question_id, stdin, expected_output, is_hidden]
+            }
+        })
         // Only send to Host? Or send "Hidden Case Added" to students?
         // Simpler: Just refresh state for everyone, filtering hidden logic in join/refresh.
     });
@@ -333,11 +352,20 @@ async function setupTestEvents(socket,io) {
     // --- 3. Joinee Events ---
     socket.on('save_code', async ({ test_id, question_id, code, language }) => {
         // Save to DB
-        await db.execute(`
+        const query=`
         INSERT INTO test_submissions (test_id, question_id, user_id, code, language)
         VALUES (?, ?, ?, ?, ?)
         ON DUPLICATE KEY UPDATE code=?, language=?, last_updated=NOW()
-    `, [test_id, question_id, user_id, code, language, code, language]);
+    `
+        // await db.execute(query, [test_id, question_id, user_id, code, language, code, language]);
+        await produceEvent(Topics.DB_TOPIC,{
+            type:Events.DB_QUERY.type,
+            payload:{
+                desc:`saving code of user_id=${user_id} in test_id=${test_id} for question_id=${question_id}`,
+                query:query,
+                params:[test_id, question_id, user_id, code, language, code, language]
+            }
+        });
 
         // Broadcast to Host so they can see it LIVE
         // We emit to the room; Host frontend will filter for the selected student

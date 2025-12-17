@@ -2,9 +2,8 @@ import { db } from "./sql_connection.js";
 
 const handleDbQuery = async (payload) => {
     try {
-        const eventName=Events.DB_QUERY.type
         const { query, params} = payload;
-        for(let i=0;i<1000;i++) await db.execute(query, params); 
+        await db.execute(query, params); 
     } catch (error) {
         console.error(`Error in handleDbQuery: ${error.message}`);
     }
