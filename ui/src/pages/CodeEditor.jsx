@@ -1,10 +1,13 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import Editor from '@monaco-editor/react';
 import {
   Play, CheckCircle, XCircle, Loader2,
-  Terminal, Plus, Trash2, Lock 
+  Terminal, Plus, Trash2, Lock
 } from 'lucide-react';
 import api from '../services/api';
+
+// --- CONFIG ---
+const DEBOUNCE_MS = 1000; // Wait 1s after typing stops before auto-saving
 
 // --- BOILERPLATE TEMPLATES ---
 const BOILERPLATES = {
@@ -20,16 +23,21 @@ const BOILERPLATES = {
 const CodeEditor = ({
   value,
   language,
-  onChange,
+  onChange,           // Immediate UI update (Required for controlled component)
+  onEmit,             // Debounced update (API calls, Sockets, Auto-save)
   onLanguageChange,
   readOnly = false,
   initialTestCases,
   onScoreUpdate,
   questionId
 }) => {
+  // --- Refs for Debouncing ---
+  const editorRef = useRef(null);
+  const latestValueRef = useRef(value || "");
+  const timerRef = useRef(null);
+
   // --- State ---
   const [activeTab, setActiveTab] = useState('testcase');
-  // Default state
   const [testCases, setTestCases] = useState([{ id: 1, input: '', expected: '', is_hidden: 0 }]);
   const [activeTestCaseId, setActiveTestCaseId] = useState(1);
   const [testResults, setTestResults] = useState(null);
@@ -38,6 +46,77 @@ const CodeEditor = ({
   const [isLanguagesLoading, setIsLanguagesLoading] = useState(false);
   const [panelHeight, setPanelHeight] = useState(250);
   const [isDragging, setIsDragging] = useState(false);
+
+  // --- DEBOUNCE LOGIC START ---
+
+  // 1. Low-level emit (fire-and-forget)
+  const emitNow = useCallback((payload) => {
+    if (!onEmit) return;
+    try {
+      onEmit(payload);
+    } catch (e) {
+      console.error("Editor emit failed", e);
+    }
+  }, [onEmit]);
+
+  // 2. Schedule Emit (The Debouncer)
+  const scheduleEmit = useCallback((payload) => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => {
+      emitNow(payload);
+      timerRef.current = null;
+    }, DEBOUNCE_MS);
+  }, [emitNow]);
+
+  // 3. Flush (Force send immediately - used on Run/Blur/Unmount)
+  const flushEmit = useCallback(() => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+      
+      // Send a Snapshot when flushing to be safe
+      emitNow({
+        type: "SNAPSHOT",
+        questionId,
+        code: latestValueRef.current,
+        ts: Date.now(),
+        isFlush: true
+      });
+    }
+  }, [emitNow, questionId]);
+
+  // 4. Handle Editor Mount (Attach Blur Listeners)
+  const handleEditorDidMount = (editor, monaco) => {
+    editorRef.current = editor;
+
+    // Listen for changes to create Deltas (Optional, but good for detailed history)
+    editor.onDidChangeModelContent((e) => {
+      // We only schedule the emit here.
+      // The actual state update happens in handleEditorChange below.
+      scheduleEmit({
+        type: "DELTA",
+        questionId,
+        changes: e.changes, // Array of changes from Monaco
+        code: editor.getValue(), // Include full code just in case
+        ts: Date.now(),
+      });
+    });
+
+    // Flush immediately when user clicks away
+    editor.onDidBlurEditorWidget(() => {
+      flushEmit();
+    });
+  };
+
+  // 5. Cleanup on Unmount
+  useEffect(() => {
+    return () => {
+      flushEmit();
+    };
+  }, [flushEmit]);
+
+  // --- DEBOUNCE LOGIC END ---
+
 
   // --- HELPER: Normalize Judge0 Name to Simple Key ---
   const getMonacoLanguage = (judge0Name) => {
@@ -78,31 +157,25 @@ const CodeEditor = ({
     };
 
     fetchLanguages();
-  }, [readOnly]); 
+  }, [readOnly]);
 
-  // --- 2. Sync Test Cases when Props Change (CRITICAL FIX) ---
+  // --- 2. Sync Test Cases when Props Change ---
   useEffect(() => {
-    // Only update if we have new cases coming in (like switching questions)
-    // Or if we are switching from no cases to some cases
     if (initialTestCases && initialTestCases.length > 0) {
       const processedCases = initialTestCases.map(tc => ({
         ...tc,
-        // Ensure is_hidden is consistently 0 or 1 for logic checks
         is_hidden: (tc.is_hidden === 1 || tc.is_hidden === true) ? 1 : 0
       }));
       setTestCases(processedCases);
-      // Reset selection to first case of the new question
       setActiveTestCaseId(processedCases[0].id);
-      // Clear old results from previous question
       setTestResults(null);
     } else {
-      // If no initial cases (e.g. creating new question), reset to default empty case
       if (!questionId) {
-          setTestCases([{ id: 1, input: '', expected: '', is_hidden: 0 }]);
-          setActiveTestCaseId(1);
+        setTestCases([{ id: 1, input: '', expected: '', is_hidden: 0 }]);
+        setActiveTestCaseId(1);
       }
     }
-  }, [initialTestCases, questionId]); // Dependency on initialTestCases ensures update
+  }, [initialTestCases, questionId]);
 
   // --- Handle Language Change ---
   const handleLanguageSelect = (e) => {
@@ -110,7 +183,32 @@ const CodeEditor = ({
     if (onLanguageChange) onLanguageChange(newLangName);
     const simpleKey = getMonacoLanguage(newLangName);
     const template = BOILERPLATES[simpleKey] || BOILERPLATES.plaintext;
+    
+    // Update immediately
     if (onChange) onChange(template);
+    
+    // Also trigger an emit since the content changed drastically
+    latestValueRef.current = template;
+    scheduleEmit({ type: "SNAPSHOT", code: template, questionId, ts: Date.now() });
+  };
+
+  // --- Intercept Editor Change ---
+  const handleEditorChange = (val) => {
+    // 1. Update Refs for the debouncer
+    latestValueRef.current = val ?? "";
+    
+    // 2. Call parent onChange immediately (Ui responsiveness)
+    if (onChange) onChange(val);
+
+    // 3. Fallback: If onDidChangeModelContent fails or isn't used, 
+    // we schedule a snapshot here to be safe.
+    // (The debouncer inside scheduleEmit handles the "don't emit every char" part)
+    scheduleEmit({
+        type: "SNAPSHOT",
+        questionId,
+        code: latestValueRef.current,
+        ts: Date.now(),
+    });
   };
 
   // --- Resize Logic ---
@@ -139,15 +237,14 @@ const CodeEditor = ({
   // --- Helpers for Test Case Logic ---
   const updateTestCase = (field, value) => {
     setTestCases(prev => prev.map(tc => {
-      // Security check: prevent editing if hidden
-      if (tc.id === activeTestCaseId && tc.is_hidden === 1) return tc; 
+      if (tc.id === activeTestCaseId && tc.is_hidden === 1) return tc;
       return tc.id === activeTestCaseId ? { ...tc, [field]: value } : tc
     }));
   };
 
   const addTestCase = () => {
     const newId = testCases.length > 0 ? Math.max(...testCases.map(t => t.id)) + 1 : 1;
-    setTestCases([...testCases, { id: newId, input: '', expected: '', is_hidden: 0 }]); 
+    setTestCases([...testCases, { id: newId, input: '', expected: '', is_hidden: 0 }]);
     setActiveTestCaseId(newId);
   };
 
@@ -164,6 +261,9 @@ const CodeEditor = ({
 
   // --- Run Code Logic ---
   const handleRunCode = async () => {
+    // CRITICAL: Flush any pending code changes before running!
+    flushEmit();
+
     setIsLoading(true);
     setActiveTab('result');
     setTestResults(null);
@@ -172,62 +272,54 @@ const CodeEditor = ({
     try {
       const selectedLangObj = languageList.find(l => l.name === language);
       const language_id = selectedLangObj ? selectedLangObj.id : 63;
-
       let responseData;
 
-      // SCENARIO A: Running against Question (OA Mode)
       if (questionId) {
-          const response = await api.post(`/editor/submitCode`, {
+        const response = await api.post(`/editor/submitCode`, {
+          language_id,
+          source_code: value, // Uses current prop value (should be synced)
+          question_id: questionId
+        });
+        responseData = response.data;
+      }
+      else {
+        const promises = testCases.map(testCase =>
+          api.post(`/editor/submitCode`, {
             language_id,
             source_code: value,
-            question_id: questionId
-          });
-          responseData = response.data;
-      } 
-      // SCENARIO B: Custom Run (Solo Mode)
-      else {
-          const promises = testCases.map(testCase =>
-            api.post(`/editor/submitCode`, {
-              language_id,
-              source_code: value,
-              stdin: testCase.input,
-              expected_output: testCase.expected
-            }).then(res => ({
-              ...res.data,
-              testCaseId: testCase.id,
-              input: testCase.input,
-              expected: testCase.expected
-            })).catch(err => ({
-              status: { id: 0, description: "Error" },
-              stderr: err.message,
-              testCaseId: testCase.id,
-              input: testCase.input,
-              expected: testCase.expected
-            }))
-          );
-          const results = await Promise.all(promises);
-          responseData = { results }; // Uniform structure
+            stdin: testCase.input,
+            expected_output: testCase.expected
+          }).then(res => ({
+            ...res.data,
+            testCaseId: testCase.id,
+            input: testCase.input,
+            expected: testCase.expected
+          })).catch(err => ({
+            status: { id: 0, description: "Error" },
+            stderr: err.message,
+            testCaseId: testCase.id,
+            input: testCase.input,
+            expected: testCase.expected
+          }))
+        );
+        const results = await Promise.all(promises);
+        responseData = { results };
       }
 
-      // --- Process Results ---
       if (responseData) {
-          // 1. Handle Results Array
-          const resultsArray = Array.isArray(responseData) ? responseData : (responseData.results || []);
-          setTestResults(resultsArray);
-
-          // 2. Notify Score
-          if (typeof responseData.score === 'number' && onScoreUpdate) {
-              onScoreUpdate(responseData.score);
-          }
+        const resultsArray = Array.isArray(responseData) ? responseData : (responseData.results || []);
+        setTestResults(resultsArray);
+        if (typeof responseData.score === 'number' && onScoreUpdate) {
+          onScoreUpdate(responseData.score);
+        }
       }
 
     } catch (error) {
       console.error("Execution error:", error);
-      // Visual Error Feedback
       setTestResults([{
-          status: { id: 0, description: "Execution Error" },
-          stderr: error.response?.data?.message || error.message,
-          testCaseId: activeTestCaseId
+        status: { id: 0, description: "Execution Error" },
+        stderr: error.response?.data?.message || error.message,
+        testCaseId: activeTestCaseId
       }]);
     } finally {
       setIsLoading(false);
@@ -244,10 +336,8 @@ const CodeEditor = ({
     if (!testResults) return null;
     const allPassed = testResults.every(r => r.status?.id === 3);
     if (allPassed) return { text: "Accepted", color: "text-emerald-500", bg: "bg-emerald-500/10 border-emerald-500/20" };
-
     const error = testResults.find(r => r.status?.id !== 3 && r.status?.id !== 4);
     if (error) return { text: error.status?.description || "Error", color: "text-yellow-500", bg: "bg-yellow-500/10 border-yellow-500/20" };
-
     return { text: "Wrong Answer", color: "text-red-500", bg: "bg-red-500/10 border-red-500/20" };
   };
 
@@ -293,9 +383,19 @@ const CodeEditor = ({
           height="100%"
           language={getMonacoLanguage(language)}
           value={value}
-          onChange={(val) => onChange && onChange(val)}
+          onMount={handleEditorDidMount} // ADDED: Mount handler for Blur/Deltas
+          onChange={handleEditorChange}  // UPDATED: Wrapper for onChange + Debounce
           theme="vs-dark"
-          options={{ minimap: { enabled: false }, fontSize: 14, fontFamily: "'JetBrains Mono', monospace", wordWrap: 'on', readOnly: readOnly, automaticLayout: true, padding: { top: 16, bottom: 16 }, background: '#0D1117' }}
+          options={{
+            minimap: { enabled: false },
+            fontSize: 14,
+            fontFamily: "'JetBrains Mono', monospace",
+            wordWrap: 'on',
+            readOnly: readOnly,
+            automaticLayout: true,
+            padding: { top: 16, bottom: 16 },
+            background: '#0D1117'
+          }}
         />
       </div>
 
@@ -332,64 +432,61 @@ const CodeEditor = ({
                       <div className={`w-1.5 h-1.5 rounded-full ${result ? statusColor.replace('text-', 'bg-') : 'bg-gray-500'}`}></div>
                       Case {idx + 1}
                     </div>
-                    
-                    {/* Lock Icon for Hidden, Delete for Visible */}
+
                     {tc.is_hidden === 1 ? (
-                       <Lock className="w-3 h-3 text-gray-600" /> 
+                      <Lock className="w-3 h-3 text-gray-600" />
                     ) : (
-                       // Only allow delete if in Solo mode (no questionId) or if you want to allow removing local samples
-                       !questionId && testCases.length > 1 && <Trash2 onClick={(e) => removeTestCase(tc.id, e)} className="w-3 h-3 opacity-0 group-hover:opacity-100 hover:text-red-400" />
+                      !questionId && testCases.length > 1 && <Trash2 onClick={(e) => removeTestCase(tc.id, e)} className="w-3 h-3 opacity-0 group-hover:opacity-100 hover:text-red-400" />
                     )}
 
                   </button>
                 )
               })}
               {!questionId && (
-                  <button onClick={addTestCase} className="flex items-center gap-2 px-3 py-2 text-xs text-emerald-400 hover:bg-[#21262d] rounded"><Plus className="w-3 h-3" /> Add Case</button>
+                <button onClick={addTestCase} className="flex items-center gap-2 px-3 py-2 text-xs text-emerald-400 hover:bg-[#21262d] rounded"><Plus className="w-3 h-3" /> Add Case</button>
               )}
             </div>
 
             {/* RIGHT CONTENT */}
             <div className="flex-1 p-4 overflow-y-auto custom-scrollbar">
-              
+
               {/* --- INPUT / EXPECTED TAB --- */}
               {activeTab === 'testcase' && (
                 <div className="h-full">
-                    {/* Locked View for Hidden Test Cases */}
-                    {activeInput?.is_hidden === 1 ? (
-                        <div className="flex flex-col items-center justify-center h-full text-gray-500 space-y-3 select-none">
-                            <div className="p-4 bg-[#161B22] rounded-full border border-[#30363D]">
-                                <Lock className="w-8 h-8 text-gray-400" />
-                            </div>
-                            <div className="text-center">
-                                <h3 className="text-sm font-semibold text-gray-300">Hidden Test Case</h3>
-                                <p className="text-xs max-w-[200px] mx-auto mt-1">The input and expected output for this test case are hidden.</p>
-                            </div>
-                        </div>
-                    ) : (
-                        <div className="space-y-4">
-                        <div>
-                            <label className="block text-xs font-bold text-gray-500 mb-2 uppercase">Input (Stdin)</label>
-                            <textarea 
-                                value={activeInput?.input || ''} 
-                                onChange={(e) => updateTestCase('input', e.target.value)} 
-                                readOnly={!!questionId} // Read-only if part of OA question
-                                className="w-full h-24 bg-[#161B22] border border-[#30363D] rounded p-3 text-sm font-mono text-gray-300 focus:border-emerald-500 focus:outline-none resize-none" 
-                                placeholder="Enter input..." 
-                            />
-                        </div>
-                        <div>
-                            <label className="block text-xs font-bold text-gray-500 mb-2 uppercase">Expected Output</label>
-                            <textarea 
-                                value={activeInput?.expected || ''} 
-                                onChange={(e) => updateTestCase('expected', e.target.value)} 
-                                readOnly={!!questionId} // Read-only if part of OA question
-                                className="w-full h-24 bg-[#161B22] border border-[#30363D] rounded p-3 text-sm font-mono text-gray-300 focus:border-emerald-500 focus:outline-none resize-none" 
-                                placeholder="Enter expected output..." 
-                            />
-                        </div>
-                        </div>
-                    )}
+                  {activeInput?.is_hidden === 1 ? (
+                    <div className="flex flex-col items-center justify-center h-full text-gray-500 space-y-3 select-none">
+                      <div className="p-4 bg-[#161B22] rounded-full border border-[#30363D]">
+                        <Lock className="w-8 h-8 text-gray-400" />
+                      </div>
+                      <div className="text-center">
+                        <h3 className="text-sm font-semibold text-gray-300">Hidden Test Case</h3>
+                        <p className="text-xs max-w-[200px] mx-auto mt-1">The input and expected output for this test case are hidden.</p>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      <div>
+                        <label className="block text-xs font-bold text-gray-500 mb-2 uppercase">Input (Stdin)</label>
+                        <textarea
+                          value={activeInput?.input || ''}
+                          onChange={(e) => updateTestCase('input', e.target.value)}
+                          readOnly={!!questionId}
+                          className="w-full h-24 bg-[#161B22] border border-[#30363D] rounded p-3 text-sm font-mono text-gray-300 focus:border-emerald-500 focus:outline-none resize-none"
+                          placeholder="Enter input..."
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold text-gray-500 mb-2 uppercase">Expected Output</label>
+                        <textarea
+                          value={activeInput?.expected || ''}
+                          onChange={(e) => updateTestCase('expected', e.target.value)}
+                          readOnly={!!questionId}
+                          className="w-full h-24 bg-[#161B22] border border-[#30363D] rounded p-3 text-sm font-mono text-gray-300 focus:border-emerald-500 focus:outline-none resize-none"
+                          placeholder="Enter expected output..."
+                        />
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -412,33 +509,32 @@ const CodeEditor = ({
                       </div>
 
                       {activeResult ? (
-                        /* Locked Result View */
                         activeInput?.is_hidden === 1 ? (
-                            <div className="mt-8 text-center p-6 rounded-lg border border-[#30363D] bg-[#161B22]/50">
-                                <div className="flex items-center justify-center mb-3">
-                                    {activeResult.status?.id === 3 
-                                        ? <CheckCircle className="w-10 h-10 text-emerald-500 opacity-80" /> 
-                                        : <XCircle className="w-10 h-10 text-red-500 opacity-80" />
-                                    }
-                                </div>
-                                <h3 className={`text-sm font-bold mb-1 ${activeResult.status?.id === 3 ? 'text-emerald-500' : 'text-red-500'}`}>
-                                    {activeResult.status?.id === 3 ? 'Passed Hidden Test' : 'Failed Hidden Test'}
-                                </h3>
-                                <p className="text-xs text-gray-500">Input, expected output, and stdout are hidden for this test case.</p>
+                          <div className="mt-8 text-center p-6 rounded-lg border border-[#30363D] bg-[#161B22]/50">
+                            <div className="flex items-center justify-center mb-3">
+                              {activeResult.status?.id === 3
+                                ? <CheckCircle className="w-10 h-10 text-emerald-500 opacity-80" />
+                                : <XCircle className="w-10 h-10 text-red-500 opacity-80" />
+                              }
                             </div>
+                            <h3 className={`text-sm font-bold mb-1 ${activeResult.status?.id === 3 ? 'text-emerald-500' : 'text-red-500'}`}>
+                              {activeResult.status?.id === 3 ? 'Passed Hidden Test' : 'Failed Hidden Test'}
+                            </h3>
+                            <p className="text-xs text-gray-500">Input, expected output, and stdout are hidden for this test case.</p>
+                          </div>
                         ) : (
-                        <div className="space-y-4">
-                          <div className="grid grid-cols-2 gap-4">
-                            <div><label className="block text-xs font-bold text-gray-500 mb-1">Input</label><div className="bg-[#161B22] border border-[#30363D] p-2 rounded text-sm font-mono text-gray-300">{activeResult.input}</div></div>
-                            <div><label className="block text-xs font-bold text-gray-500 mb-1">Expected</label><div className="bg-[#161B22] border border-[#30363D] p-2 rounded text-sm font-mono text-gray-300">{activeResult.expected}</div></div>
-                          </div>
-                          <div>
-                            <label className="block text-xs font-bold text-gray-500 mb-1">Output</label>
-                            <div className={`bg-[#161B22] border p-2 rounded text-sm font-mono ${activeResult.status?.id === 3 ? 'border-emerald-500/50 text-white' : 'border-red-500/50 text-red-200'}`}>
-                              {activeResult.stdout || activeResult.stderr || activeResult.compile_output || "No output"}
+                          <div className="space-y-4">
+                            <div className="grid grid-cols-2 gap-4">
+                              <div><label className="block text-xs font-bold text-gray-500 mb-1">Input</label><div className="bg-[#161B22] border border-[#30363D] p-2 rounded text-sm font-mono text-gray-300">{activeResult.input}</div></div>
+                              <div><label className="block text-xs font-bold text-gray-500 mb-1">Expected</label><div className="bg-[#161B22] border border-[#30363D] p-2 rounded text-sm font-mono text-gray-300">{activeResult.expected}</div></div>
+                            </div>
+                            <div>
+                              <label className="block text-xs font-bold text-gray-500 mb-1">Output</label>
+                              <div className={`bg-[#161B22] border p-2 rounded text-sm font-mono ${activeResult.status?.id === 3 ? 'border-emerald-500/50 text-white' : 'border-red-500/50 text-red-200'}`}>
+                                {activeResult.stdout || activeResult.stderr || activeResult.compile_output || "No output"}
+                              </div>
                             </div>
                           </div>
-                        </div>
                         )
                       ) : <div className="text-center text-gray-500 text-sm mt-10">Select a test case to view details</div>}
                     </div>
