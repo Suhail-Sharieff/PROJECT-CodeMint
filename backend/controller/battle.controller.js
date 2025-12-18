@@ -158,7 +158,8 @@ export const setupBattleEvents = async (io, socket) => {
                 battleCases, // Now includes masked hidden cases for joinees
                 savedCode,
                 users,
-                timeLeft
+                timeLeft,
+                duration: battleMeta.duration,
             });
 
             if (role === 'joinee') {
@@ -229,8 +230,11 @@ export const setupBattleEvents = async (io, socket) => {
         socket.disconnect();
     });
     // --- 3. Joinee Events ---
-    socket.on('save_battle_code', async ({ battle_id, battle_question_id, code, language }) => {
+    socket.on('save_battle_code', async (data) => {
         // Save to DB
+        const { battle_id, battle_question_id, code, language }=data
+        console.log(data);
+        
         await db.execute(`
              INSERT INTO battle_submissions (battle_id, battle_question_id, user_id, code, language)
              VALUES (?, ?, ?, ?, ?)

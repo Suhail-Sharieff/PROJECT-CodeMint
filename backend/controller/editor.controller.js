@@ -32,17 +32,12 @@ const constants_body = {
 
 const submitCode = asyncHandler(async (req, res) => {
     const { language_id, source_code, stdin, expected_output, question_id } = req.body;
-
-    // NOTE: Ensure your route middleware adds user info (verifyJWT)
-    // If this endpoint is public, you'll need to pass user_id in body (less secure)
     const user_id = req.user.user_id;
 
     if (!language_id || !source_code) throw new ApiError(400, "language_id/source_code missing!");
 
     try {
-        let results = [];
-
-        // --- SCENARIO 1: Custom Run (Not part of scoring) ---
+        // --- SCENARIO 1: Custom Run (Collaboration Session / Solo Editor) ---
         if (!question_id) {
             const response = await axios.post(`${JUDGE0}/submissions`,
                 { language_id, source_code, stdin, expected_output, ...constants_body },
@@ -51,15 +46,24 @@ const submitCode = asyncHandler(async (req, res) => {
             return res.status(200).json(response.data);
         }
 
-        // --- SCENARIO 2: Test Submission (Scoring) ---
-        // 1. Fetch Test Cases
-        const [dbCases] = await db.execute('SELECT * FROM testcase WHERE question_id = ?', [question_id]);
+        // --- SCENARIO 2: Test OR Battle Submission ---
+        
+        // 1. Determine Context (Check if it's a Battle Question or a Test Question)
+        const [battleQ] = await db.execute('SELECT battle_id FROM battle_question WHERE battle_question_id = ?', [question_id]);
+        const isBattle = battleQ.length > 0;
 
-        if (dbCases.length === 0) return res.status(200).json({ message: "No test cases found." });
+        // 2. Fetch Test Cases from correct table
+        let dbCases;
+        if (isBattle) {
+            [dbCases] = await db.execute('SELECT * FROM battlecase WHERE battle_question_id = ?', [question_id]);
+        } else {
+            [dbCases] = await db.execute('SELECT * FROM testcase WHERE question_id = ?', [question_id]);
+        }
 
-        // 2. Run All Cases
+        if (dbCases.length === 0) return res.status(200).json({ message: "No test cases found for this question." });
+
+        // 3. Execute all cases via Judge0
         let passedCount = 0;
-
         const promises = dbCases.map(async (testCase) => {
             try {
                 const judgeRes = await axios.post(`${JUDGE0}/submissions`,
@@ -74,123 +78,79 @@ const submitCode = asyncHandler(async (req, res) => {
                 );
 
                 const result = judgeRes.data;
+                if (result.status.id === 3) passedCount++;
 
-                // Count Passes (Status ID 3 = Accepted)
-                if (result.status.id === 3) {
-                    passedCount++;
-                }
-
-
-
-                // Sanitize Hidden Cases
-                if (testCase.is_hidden) {
-                    return {
-                        testCaseId: testCase.case_id,
-                        status: result.status,
-                        time: result.time,
-                        memory: result.memory,
-                        isHidden: true,
-                        input: "Hidden Input",
-                        expected: "Hidden Expected",
-                        stdout: "Hidden Output",
-                        stderr: null
-                    };
-                } else {
-                    return {
-                        testCaseId: testCase.case_id,
-                        status: result.status,
-                        time: result.time,
-                        memory: result.memory,
-                        isHidden: false,
-                        input: testCase.stdin,
-                        expected: testCase.expected_output,
-                        stdout: result.stdout,
-                        stderr: result.stderr,
-                        compile_output: result.compile_output
-                    };
-                }
+                return {
+                    testCaseId: testCase.case_id,
+                    status: result.status,
+                    time: result.time,
+                    memory: result.memory,
+                    isHidden: !!testCase.is_hidden,
+                    input: testCase.is_hidden ? "Hidden" : testCase.stdin,
+                    expected: testCase.is_hidden ? "Hidden" : testCase.expected_output,
+                    stdout: testCase.is_hidden ? "Hidden" : result.stdout,
+                    stderr: result.stderr,
+                    compile_output: result.compile_output
+                };
             } catch (err) {
                 return { status: { id: 0, description: "Runtime Error" }, stderr: err.message };
             }
         });
 
-        results = await Promise.all(promises);
+        const results = await Promise.all(promises);
+        const questionScore = Math.round((passedCount / dbCases.length) * 100);
 
-        // 3. Update Score in DB (Logic: Keep Highest Score)
-        // ... (inside submitCode, after results = await Promise.all(promises)) ...
+        // 4. Update Database based on Context
+        if (isBattle) {
+            const battle_id = battleQ[0].battle_id;
+            
+            // Update Battle Submissions
+            await db.execute(`
+                INSERT INTO battle_submissions (battle_id, battle_question_id, user_id, code, language)
+                VALUES (?, ?, ?, ?, ?)
+                ON DUPLICATE KEY UPDATE 
+                    code = VALUES(code),
+                    language = VALUES(language),
+                    last_updated = NOW()
+            `, [battle_id, question_id, user_id, source_code, language_id]);
 
-        let finalTotalScore = 0; // This will return the TOTAL test score
+            // Note: Battles often care about the specific question status (100% pass)
+            // rather than a cumulative total score across questions like Tests do.
+            return res.status(200).json({ results, score: questionScore, type: 'battle' });
 
-        // 3. Update Score Logic
-        if (user_id) {
+        } else {
+            // Standard Test Logic (Your existing logic)
             const [qRows] = await db.execute('SELECT test_id FROM question WHERE question_id=?', [question_id]);
+            const test_id = qRows[0].test_id;
 
-            if (qRows.length > 0) {
-                const test_id = qRows[0].test_id;
-                const totalCases = dbCases.length;
+            await db.execute(`
+                INSERT INTO test_submissions (test_id, question_id, user_id, code, language, score)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON DUPLICATE KEY UPDATE 
+                    code = VALUES(code),
+                    language = VALUES(language),
+                    score = GREATEST(score, VALUES(score)), 
+                    last_updated = NOW()
+            `, [test_id, question_id, user_id, source_code, language_id, questionScore]);
 
-                // A. Calculate Score for THIS Question
-                let questionScore = 0;
-                if (totalCases > 0) {
-                    questionScore = Math.round((passedCount / totalCases) * 100);
+            const [sumRows] = await db.execute('SELECT SUM(score) as total_score FROM test_submissions WHERE test_id = ? AND user_id = ?', [test_id, user_id]);
+            const finalTotalScore = parseInt(sumRows[0].total_score) || 0;
+
+            await produceEvent(Topics.DB_TOPIC, {
+                type: Events.DB_QUERY.type,
+                payload: {
+                    desc: `updating test_participant score user=${user_id}`,
+                    query: `UPDATE test_participant SET score = ? WHERE test_id = ? AND user_id = ?`,
+                    params: [finalTotalScore, test_id, user_id]
                 }
+            });
 
-                // B. Save this Question's Score to 'test_submissions'
-                // We use GREATEST here to ensure we don't overwrite a high score with a low one 
-                // if they retry the same question and fail.
-
-                // Note: We also save the code here to ensure persistence
-                await db.execute(`
-                    INSERT INTO test_submissions (test_id, question_id, user_id, code, language, score)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                    ON DUPLICATE KEY UPDATE 
-                        code = VALUES(code),
-                        language = VALUES(language),
-                        score = GREATEST(score, VALUES(score)), 
-                        last_updated = NOW()
-                `, [test_id, question_id, user_id, source_code, language_id, questionScore]);
-
-                // C. Calculate TOTAL Score (Sum of all questions for this test)
-                const [sumRows] = await db.execute(`
-                    SELECT SUM(score) as total_score 
-                    FROM test_submissions 
-                    WHERE test_id = ? AND user_id = ?
-                `, [test_id, user_id]);
-
-                finalTotalScore = parseInt(sumRows[0].total_score) || 0;
-
-                // D. Update the Main Participant Table with the SUM
-                // await db.execute(`
-                //     UPDATE test_participant 
-                //     SET score = ? 
-                //     WHERE test_id = ? AND user_id = ?
-                // `, [finalTotalScore, test_id, user_id]);
-                await produceEvent(Topics.DB_TOPIC, {
-                    type: Events.DB_QUERY.type,
-                    payload: {
-                        desc: `updating test_participant's score user_id=${user_id} test_id=${test_id}`,
-                        query: `
-                        UPDATE test_participant 
-                        SET score = ? 
-                        WHERE test_id = ? AND user_id = ?`,
-                        params:[finalTotalScore, test_id, user_id]
-                    }
-                })
-            }
-
-            console.log(`User ${user_id} - Question Score: ${Math.round((passedCount / dbCases.length) * 100)}, Total Test Score: ${finalTotalScore}`);
+            return res.status(200).json({ results, score: finalTotalScore, type: 'test' });
         }
 
-        // Return results AND the new Total Score
-        return res.status(200).json({
-            results: results,
-            score: finalTotalScore // Frontend can now update the total score display
-        });
-
     } catch (error) {
-        console.log(error);
-
-        return res.status(400).json(new ApiError(400, error));
+        console.error(error);
+        return res.status(400).json(new ApiError(400, "Execution failed"));
     }
 });
 export { getLanguages, submitCode };
