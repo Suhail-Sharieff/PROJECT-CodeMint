@@ -2,7 +2,10 @@ import { db } from "../Utils/sql_connection.js";
 import { ApiResponse } from "../Utils/Api_Response.utils.js";
 import { ApiError } from "../Utils/Api_Error.utils.js";
 import { asyncHandler } from "../Utils/AsyncHandler.utils.js";
-
+import { v4 as uuidv4 } from "uuid";
+import { Server,Socket } from "socket.io"
+import { produceEvent } from "../Utils/kafka_connection.js";
+import { Events, Topics } from "../Utils/kafka_events.js";
 
 const createTest = async (user_id, test_id,duration=10,title) => {
     try {
@@ -143,10 +146,7 @@ const getTestHostID=asyncHandler(
         }
     }
 )
-import { v4 as uuidv4 } from "uuid";
-import { Server,Socket } from "socket.io"
-import { produceEvent } from "../Utils/kafka_connection.js";
-import { Events, Topics } from "../Utils/kafka_events.js";
+
 /**
 * @param {Server} io
 * @param {Socket} socket
@@ -174,7 +174,6 @@ async function setupTestEvents(socket,io) {
         const test_id = uuidv4();
         // Default to 60 if not provided, ensure it is INT
         const finalDuration = parseInt(duration) || 60;
-
         await createTest(user_id, test_id, finalDuration, title);
         await joinTest(user_id, test_id);
 

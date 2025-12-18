@@ -9,6 +9,7 @@ import { db } from "./Utils/sql_connection.js";
 //********************************************* */
 import { setupSessionEvents } from "./controller/session.controller.js";
 import { setupTestEvents } from "./controller/test.controller.js";
+import { setupBattleEvents } from "./controller/battle.controller.js";
 // import { setupBattleEvents } from "./controller/battle.controller.js";
 export function registerSocketEvents(io) {
 
@@ -41,7 +42,7 @@ export function registerSocketEvents(io) {
         await setupSessionEvents(socket,io);
         await db.execute('UPDATE user SET socket_id=? WHERE user_id=?', [socket.id, socket.user.user_id]);
         await setupTestEvents(socket,io); // Initializes the join_test listener
-        // await setupBattleEvents(io,socket)
+        await setupBattleEvents(io,socket)
         // --- GLOBAL DISCONNECT HANDLER ---
         socket.on('disconnect', async () => {
             if (!socket.user) return;

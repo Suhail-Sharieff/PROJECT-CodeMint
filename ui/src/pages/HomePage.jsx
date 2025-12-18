@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../context/SocketContext';
 import api from '../services/api';
+import { Swords } from 'lucide-react'; // Added icon for Battle
 
 const HomePage = () => {
   const { user } = useAuth();
@@ -12,6 +13,7 @@ const HomePage = () => {
   // State for inputs
   const [joinSessionId, setJoinSessionId] = useState('');
   const [joinTestId, setJoinTestId] = useState('');
+  const [joinBattleId, setJoinBattleId] = useState(''); // NEW: Battle State
 
   // --- SOCKET EVENT LISTENERS ---
   useEffect(() => {
@@ -23,26 +25,34 @@ const HomePage = () => {
       navigate(`/hostView/${newSessionId}`);
     };
 
-    // 2. Handler for Test/Assessment (NEW)
+    // 2. Handler for Test/Assessment
     const handleTestCreated = (newTestId) => {
       console.log('Test created with ID:', newTestId);
-      // Navigate to the Host Test Dashboard
       navigate(`/hostTestView/${newTestId}`);
+    };
+
+    // 3. Handler for Battle (NEW)
+    const handleBattleCreated = (newBattleId) => {
+      console.log('Battle created:', newBattleId);
+      navigate(`/hostBattleView/${newBattleId}`);
     };
 
     // Attach listeners
     socket.on('session_created', handleSessionCreated);
     socket.on('test_created', handleTestCreated);
+    socket.on('battle_created', handleBattleCreated);
 
     // Cleanup listeners on unmount
     return () => {
       socket.off('session_created', handleSessionCreated);
       socket.off('test_created', handleTestCreated);
+      socket.off('battle_created', handleBattleCreated);
     };
   }, [socket, navigate]);
 
   // --- HANDLERS ---
 
+  // 1. Session Handlers
   const handleCreateSession = () => {
     if (!socket) {
         alert("Socket not connected. Please try again.");
@@ -56,17 +66,11 @@ const HomePage = () => {
     if (joinSessionId.trim()) {
       try {
         const res = await api.get(`/session/getHostIdOf/${joinSessionId.trim()}`);
-        const host_id = res.data.data; // ApiResponse wraps data in .data field
-        // console.log(`host_id=${host_id} user_id=${user.user_id}`);
-        // console.log('res',res);
+        const host_id = res.data.data;
         
         if (host_id !== user.user_id) {
-          console.log('user is not host');
-          
           navigate(`/joinView/${joinSessionId.trim()}`);
         } else {
-          console.log('user is host');
-          
           navigate(`/hostView/${joinSessionId.trim()}`);
         }
       } catch (err) {
@@ -76,22 +80,20 @@ const HomePage = () => {
     }
   };
 
-  // Updated: Asks for duration before creating test
-  
+  // 2. Test Handlers
   const handleCreateTest = () => {
     if (!socket) return alert("Socket not connected.");
     
     const durationInput = prompt("Enter test duration in minutes:", "60");
-    if (durationInput === null) return; // Cancelled
+    if (durationInput === null) return;
 
     const duration = parseInt(durationInput);
     if (isNaN(duration) || duration <= 0) return alert("Invalid duration");
 
-    const title=prompt("Enter the title for your test:")
-    if(title===null) return alert("Please enter title!")
+    const title = prompt("Enter the title for your test:");
+    if (title === null) return alert("Please enter title!");
 
-    // Send as Object { duration: 60 }
-    socket.emit('create_test', { duration ,title});
+    socket.emit('create_test', { duration, title });
   };
 
   const handleJoinTest = async(e) => {
@@ -99,24 +101,48 @@ const HomePage = () => {
     if (joinTestId.trim()) {
       try {
         const res = await api.get(`/test/getTestHostID/${joinTestId.trim()}`);
-        const host_id = res.data; // ApiResponse wraps data in .data field
-        console.log(`host_id=${host_id} user_id=${user.user_id}`);
-        console.log('res',res);
+        const host_id = res.data; // Note: Check if backend returns .data or .data.data consistently
         
         if (host_id !== user.user_id) {
-          console.log('user is not host');
-          
           navigate(`/joineeTestView/${joinTestId.trim()}`);
         } else {
-          console.log('user is host');
-          
           navigate(`/hostTestView/${joinTestId.trim()}`);
         }
       } catch (err) {
         console.error('Error joining test:', err);
         alert('Failed to join test. Please check the test ID and try again.');
       }
-      
+    }
+  };
+
+  // 3. Battle Handlers (NEW)
+  const handleCreateBattle = () => {
+    if (!socket) return alert("Socket not connected.");
+    
+    const durationInput = prompt("Enter Battle duration (minutes):", "30");
+    if (durationInput === null) return;
+    const duration = parseInt(durationInput);
+    if (isNaN(duration) || duration <= 0) return alert("Invalid duration");
+
+    const title = prompt("Enter Battle Title:", "Code War #1");
+    if (!title) return alert("Title is required");
+
+    socket.emit('create_battle', { duration, title });
+  };
+
+  const handleJoinBattle = async(e) => {
+    e.preventDefault();
+    if (!joinBattleId.trim()) return;
+    
+    try {
+        const res = await api.get(`/battle/getBattleHostID/${joinBattleId.trim()}`);
+        const host_id = res.data.data || res.data; 
+        
+        navigate(host_id !== user.user_id ? `/joineeBattleView/${joinBattleId}` : `/hostBattleView/${joinBattleId}`);
+    } catch (err) {
+        console.error("Join battle error", err);
+        // Fallback or optimistic join if API fails/doesn't exist yet
+        navigate(`/joineeBattleView/${joinBattleId}`);
     }
   };
 
@@ -144,7 +170,8 @@ const HomePage = () => {
             </button>
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          {/* MAIN GRID - Changed to support 3 columns on large screens */}
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-8">
 
             {/* COLUMN 1: COLLABORATION (Live Coding) */}
             <div className="space-y-6">
@@ -229,6 +256,50 @@ const HomePage = () => {
                     className="px-6 bg-gray-800 hover:bg-gray-700 text-white font-semibold rounded-xl border border-gray-700 transition-all"
                   >
                     Start
+                  </button>
+                </form>
+              </div>
+            </div>
+
+            {/* COLUMN 3: BATTLE ARENA (NEW) */}
+            <div className="space-y-6">
+              <div className="flex items-center gap-3 mb-2">
+                <div className="p-2 bg-red-500/10 rounded-lg">
+                  <svg className="w-6 h-6 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+                </div>
+                <h2 className="text-xl font-bold text-white">Battle Arena</h2>
+              </div>
+
+              {/* Card: Host Battle */}
+              <div className="bg-[#161B22] border border-gray-800 rounded-2xl p-6 hover:border-red-500/30 transition-colors group">
+                <h3 className="text-lg font-semibold text-white mb-2">Competitive Coding</h3>
+                <p className="text-sm text-gray-500 mb-6">Race against others. First to solve 100% test cases wins.</p>
+                <button
+                  onClick={handleCreateBattle}
+                  className="w-full py-3 px-4 bg-red-600 hover:bg-red-500 text-white font-bold rounded-xl transition-all shadow-[0_0_20px_rgba(220,38,38,0.1)] group-hover:shadow-[0_0_20px_rgba(220,38,38,0.3)] flex items-center justify-center gap-2"
+                >
+                  <Swords size={20} />
+                  Host Battle
+                </button>
+              </div>
+
+              {/* Card: Join Battle */}
+              <div className="bg-[#161B22] border border-gray-800 rounded-2xl p-6 hover:border-red-500/30 transition-colors">
+                <h3 className="text-lg font-semibold text-white mb-2">Enter Arena</h3>
+                <p className="text-sm text-gray-500 mb-4">Enter a Battle ID to compete.</p>
+                <form onSubmit={handleJoinBattle} className="flex gap-3">
+                  <input
+                    type="text"
+                    placeholder="e.g. battle-001"
+                    value={joinBattleId}
+                    onChange={(e) => setJoinBattleId(e.target.value)}
+                    className="flex-1 bg-[#0D1117] border border-gray-700 rounded-xl px-4 py-3 text-white placeholder-gray-600 focus:outline-none focus:border-red-500 transition-colors"
+                  />
+                  <button
+                    type="submit"
+                    className="px-6 bg-gray-800 hover:bg-gray-700 text-white font-semibold rounded-xl border border-gray-700 transition-all hover:text-red-400"
+                  >
+                    Fight
                   </button>
                 </form>
               </div>

@@ -16,14 +16,17 @@ import HostTestView from './pages/HostTestView';
 import JoineeTestView from './pages/JoineeTestView';
 import MyTests from './pages/MyTests';
 import TestDetailsPage from './pages/TestDetails';
+import { useSocket } from './context/SocketContext';
+import HostBattleView from './pages/HostBattleView';
+import JoineeBattleView from './pages/JoineeBattleView';
 
 // 1. Create the ProtectedRoute Component
 // This checks if a user exists. If not, it kicks them to '/login'.
 const ProtectedRoute = () => {
   const { user } = useAuth();
-  
+  const {socket}=useSocket()
   // If not logged in, redirect to login page
-  if (!user) {
+  if (!user || !socket) {
     return <Navigate to="/login" replace />;
   }
 
@@ -68,6 +71,8 @@ function App() {
            <Route path="/joineeTestView/:test_id" element={<JoineeTestView />} />
            <Route path="/myTests" element={<MyTests />} />
            <Route path="/test-details/:test_id" element={<TestDetailsPage />} />
+           <Route path="/hostBattleView/:session_id" element={<HostBattleView />} />
+           <Route path="/joineeBattleView/:session_id" element={<JoineeBattleView />} />
         </Route>
 
       </Routes>

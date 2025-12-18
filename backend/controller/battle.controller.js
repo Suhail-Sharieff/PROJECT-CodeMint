@@ -1,6 +1,45 @@
 import { v4 as uuidv4 } from "uuid";
 import { db } from "../Utils/sql_connection.js";
 import { Server, Socket } from "socket.io"
+import { ApiError } from "../Utils/Api_Error.utils.js";
+
+
+
+const createbattle = async (user_id, battle_id,duration=10,title) => {
+    try {
+        if (!user_id) throw new ApiError(400, `No user_id provided by SocketManager to create battle!`)
+        if (!battle_id) throw new ApiError(400, `No battle_id provided by SocketManager to create battle!`)
+
+        const query = 'insert into battle (battle_id,host_id,duration,title) values(?,?,?,?)'
+        const [rows] = await db.execute(query, [battle_id,user_id,duration,title])
+        if (rows.length === 0) throw new ApiError(400, "Unabe to create battle!")
+
+
+
+
+
+    } catch (e) {
+        throw new ApiError(400, e.message);
+    }
+}
+const joinbattle=
+    async(user_id,battle_id)=>{
+       try{
+            if(!battle_id) throw new ApiError(400,"Socket manager didnt provide battle_id to join battle!")
+            if(!user_id) throw new ApiError(400,"Socket manager didnt provide user_id to join battle!")
+
+            const query='insert into battle_participant(battle_id,user_id) values (?,?)'
+            const [rows]=await db.execute(query,[battle_id,user_id])
+            
+            console.log(`User id = ${user_id} joined battle_id = ${battle_id}`);
+            
+
+       }catch(e){
+           throw new ApiError(400, e.message);
+       }
+        
+    }
+
 /**
 * @param {Server} io
 * @param {Socket} socket
@@ -9,81 +48,83 @@ import { Server, Socket } from "socket.io"
 
 export const setupBattleEvents = async (io, socket) => {
     const { user_id, name } = socket.user;
-    socket.on('kick_test_user', async ({ test_id, user_id_to_kick }) => {
+    socket.on('kick_battle_user', async ({ battle_id, user_id_to_kick }) => {
         const { user_id } = socket.user;
         // Verify Host
-        const [check] = await db.execute('SELECT host_id FROM test WHERE test_id=?', [test_id]);
+        const [check] = await db.execute('SELECT host_id FROM battle WHERE battle_id=?', [battle_id]);
         if (check[0].host_id !== user_id) return;
 
-        await db.execute('update test_participant set status=? WHERE test_id=? AND user_id=?', ["finished", test_id, user_id_to_kick]);
+        await db.execute('update battle_participant set status=? WHERE battle_id=? AND user_id=?', ["finished", battle_id, user_id_to_kick]);
 
         // Find socket and force kick
         const [u] = await db.execute('SELECT socket_id FROM user WHERE user_id=?', [user_id_to_kick]);
         if (u.length > 0 && u[0].socket_id) {
             io.to(u[0].socket_id).emit('kicked');
         }
-        io.to(test_id).emit('joinee_left', user_id_to_kick);
+        io.to(battle_id).emit('joinee_left', user_id_to_kick);
     });
     // --- 1. Create & Join Logic ---
-    socket.on('create_test', async ({ duration, title }) => {
-        const test_id = uuidv4();
+    socket.on('create_battle', async ({ duration, title }) => {
+        const battle_id = uuidv4();
         // Default to 60 if not provided, ensure it is INT
+        console.log('battle creation');
+        
         const finalDuration = parseInt(duration) || 60;
 
-        await createTest(user_id, test_id, finalDuration, title);
-        await joinTest(user_id, test_id);
+        await createbattle(user_id, battle_id, finalDuration, title);
+        await joinbattle(user_id, battle_id);
 
-        socket.emit('test_created', test_id);
+        socket.emit('battle_created', battle_id);
     });
 
-    socket.on('join_test', async ({ test_id }) => {
+    socket.on('join_battle', async ({ battle_id }) => {
         try {
-            socket.join(test_id);
-            socket.current_test_id = test_id;
+            socket.join(battle_id);
+            socket.current_battle_id = battle_id;
             const { user_id, name } = socket.user;
 
             // 1. Metadata & Role
-            const [testRows] = await db.execute('SELECT host_id, status, start_time, duration FROM test WHERE test_id = ?', [test_id]);
-            if (testRows.length === 0) return socket.emit('error', { message: "Test not found" });
+            const [battleRows] = await db.execute('SELECT host_id, status, start_time, duration FROM battle WHERE battle_id = ?', [battle_id]);
+            if (battleRows.length === 0) return socket.emit('error', { message: "battle not found" });
 
-            const testMeta = testRows[0];
-            const role = (testMeta.host_id === user_id) ? 'host' : 'joinee';
+            const battleMeta = battleRows[0];
+            const role = (battleMeta.host_id === user_id) ? 'host' : 'joinee';
 
-            if (testMeta.status === 'ENDED') {
-                socket.emit('error', { message: "This test has ended already" });
+            if (battleMeta.status === 'ENDED') {
+                socket.emit('error', { message: "This battle has ended already" });
                 return;
             }
 
             // 2. Check if Finished (Joinee only)
             if (role === 'joinee') {
-                const [pCheck] = await db.execute('SELECT status FROM test_participant WHERE test_id=? AND user_id=?', [test_id, user_id]);
+                const [pCheck] = await db.execute('SELECT status FROM battle_participant WHERE battle_id=? AND user_id=?', [battle_id, user_id]);
                 if (pCheck.length > 0 && pCheck[0].status === 'finished') {
-                    socket.emit('error', { message: "You have already submitted this test." });
+                    socket.emit('error', { message: "You have already submitted this battle." });
                     return;
                 }
             }
 
             // 3. Add Participant
             await db.execute(
-                `INSERT INTO test_participant (test_id, user_id, role) VALUES (?, ?, ?) 
+                `INSERT INTO battle_participant (battle_id, user_id, role) VALUES (?, ?, ?) 
                           ON DUPLICATE KEY UPDATE joined_at=NOW()`,
-                [test_id, user_id, role]
+                [battle_id, user_id, role]
             );
 
             // 4. Questions
-            const [questions] = await db.execute('SELECT * FROM question WHERE test_id = ?', [test_id]);
+            const [questions] = await db.execute('SELECT * FROM battle_question WHERE battle_id = ?', [battle_id]);
 
-            // 5. Test Cases (FIXED: Send Hidden cases, but MASKED for Joinees)
-            let testCases = [];
+            // 5. battle Cases (FIXED: Send Hidden cases, but MASKED for Joinees)
+            let battleCases = [];
             if (questions.length > 0) {
-                const qIds = questions.map(q => q.question_id);
+                const qIds = questions.map(q => q.battle_question_id);
 
                 // Fetch ALL cases for these questions
-                const query = `SELECT * FROM testcase WHERE question_id IN (${qIds.join(',')})`;
+                const query = `SELECT * FROM battlecase WHERE battle_question_id IN (${qIds.join(',')})`;
                 const [cases] = await db.execute(query);
 
                 // Sanitize Logic
-                testCases = cases.map(tc => {
+                battleCases = cases.map(tc => {
                     return tc;
                 });
             }
@@ -91,127 +132,132 @@ export const setupBattleEvents = async (io, socket) => {
             // 6. Saved Code
             let savedCode = [];
             if (role === 'host') {
-                const [allCodes] = await db.execute('SELECT user_id, question_id, code, language FROM test_submissions WHERE test_id=?', [test_id]);
+                const [allCodes] = await db.execute('SELECT user_id, battle_question_id, code, language FROM battle_submissions WHERE battle_id=?', [battle_id]);
                 savedCode = allCodes;
             } else {
-                const [myCodes] = await db.execute('SELECT question_id, code, language FROM test_submissions WHERE test_id=? AND user_id=?', [test_id, user_id]);
+                const [myCodes] = await db.execute('SELECT battle_question_id, code, language FROM battle_submissions WHERE battle_id=? AND user_id=?', [battle_id, user_id]);
                 savedCode = myCodes;
             }
 
             // 7. Users & 8. Time
-            const [users] = await db.execute('SELECT u.user_id as id, u.name, tp.role, tp.status FROM test_participant tp JOIN user u ON tp.user_id = u.user_id WHERE tp.test_id = ?', [test_id]);
+            const [users] = await db.execute('SELECT u.user_id as id, u.name, tp.role, tp.status FROM battle_participant tp JOIN user u ON tp.user_id = u.user_id WHERE tp.battle_id = ?', [battle_id]);
 
             let timeLeft = null;
-            if (testMeta.status === 'LIVE' && testMeta.start_time) {
+            if (battleMeta.status === 'LIVE' && battleMeta.start_time) {
                 const now = new Date();
-                const endTime = new Date(new Date(testMeta.start_time).getTime() + testMeta.duration * 60000);
+                const endTime = new Date(new Date(battleMeta.start_time).getTime() + battleMeta.duration * 60000);
                 timeLeft = Math.max(0, Math.floor((endTime - now) / 1000));
             }
 
             // Emit State
-            socket.emit('test_state', {
-                testId: test_id,
-                status: testMeta.status,
+            socket.emit('battle_state', {
+                battleId: battle_id,
+                status: battleMeta.status,
                 role,
                 questions,
-                testCases, // Now includes masked hidden cases for joinees
+                battleCases, // Now includes masked hidden cases for joinees
                 savedCode,
                 users,
                 timeLeft
             });
 
             if (role === 'joinee') {
-                socket.to(test_id).emit('test_participant_joined', { id: user_id, name, role, status: 'active' });
+                socket.to(battle_id).emit('battle_participant_joined', { id: user_id, name, role, status: 'active' });
             }
 
         } catch (err) {
-            console.error("Error in join_test:", err);
+            console.error("Error in join_battle:", err);
             socket.emit('error', { message: err.message });
         }
     });
     // --- 2. Host Management Events ---
-    socket.on('add_question', async ({ test_id, title, description, example }) => {
+    socket.on('add_battle_question', async ({ battle_id, title, description, example }) => {
         const [res] = await db.execute(
-            'INSERT INTO question (test_id, title, description, example) VALUES (?,?,?,?)',
-            [test_id, title, description, example]
+            'INSERT INTO battle_question (battle_id, title, description, example) VALUES (?,?,?,?)',
+            [battle_id, title, description, example]
         );
-        const question_id = res.insertId;
+        const battle_question_id = res.insertId;
         // Broadcast Update
-        io.to(test_id).emit('question_added', { question_id, test_id, title, description, example });
+        io.to(battle_id).emit('battle_question_added', { battle_question_id, battle_id, title, description, example });
     });
 
-    socket.on('add_testcase', async ({ question_id, stdin, expected_output, is_hidden }) => {
+    socket.on('add_battlecase', async ({ battle_question_id, stdin, expected_output, is_hidden }) => {
         await db.execute(
-            'INSERT INTO testcase (question_id, stdin, expected_output, is_hidden) VALUES (?,?,?,?)',
-            [question_id, stdin, expected_output, is_hidden]
+            'INSERT INTO battlecase (battle_question_id, stdin, expected_output, is_hidden) VALUES (?,?,?,?)',
+            [battle_question_id, stdin, expected_output, is_hidden]
         );
         // Only send to Host? Or send "Hidden Case Added" to students?
         // Simpler: Just refresh state for everyone, filtering hidden logic in join/refresh.
     });
 
-    socket.on('start_test', async ({ test_id }) => {
-        await db.execute('UPDATE test SET status="LIVE", start_time=NOW() WHERE test_id=?', [test_id]);
-        const [rows] = await db.execute('SELECT duration FROM test WHERE test_id=?', [test_id]);
-        io.to(test_id).emit('test_started', { duration: rows[0].duration * 60 });
+    socket.on('start_battle', async ({ battle_id }) => {
+        await db.execute('UPDATE battle SET status="LIVE", start_time=NOW() WHERE battle_id=?', [battle_id]);
+        const [rows] = await db.execute('SELECT duration FROM battle WHERE battle_id=?', [battle_id]);
+        io.to(battle_id).emit('battle_started', { duration: rows[0].duration * 60 });
     });
 
-    // --- HOST: End Test ---
-    socket.on('end_test', async ({ test_id }) => {
+    // --- HOST: End battle ---
+    socket.on('end_battle', async ({ battle_id }) => {
         try {
             // Verify host
-            const [check] = await db.execute('SELECT host_id FROM test WHERE test_id=?', [test_id]);
+            const [check] = await db.execute('SELECT host_id FROM battle WHERE battle_id=?', [battle_id]);
             if (!check[0] || check[0].host_id !== user_id) return;
 
-            // 1. Mark test as ended in DB
-            await db.execute('UPDATE test SET status="ENDED" WHERE test_id=?', [test_id]);
+            // 1. Mark battle as ended in DB
+            await db.execute('UPDATE battle SET status="ENDED" WHERE battle_id=?', [battle_id]);
 
-            // 2. Notify all participants that test ended
-            io.to(test_id).emit('test_ended', { test_id });
+            // 2. Notify all participants that battle ended
+            io.to(battle_id).emit('battle_ended', { battle_id });
 
             // 3. Optional cleanup: remove sockets from room (they may reconnect to other rooms later)
-            const socketsInRoom = await io.in(test_id).fetchSockets();
+            const socketsInRoom = await io.in(battle_id).fetchSockets();
             for (const s of socketsInRoom) {
-                s.leave(test_id);
-                s.current_test_id = null;
+                s.leave(battle_id);
+                s.current_battle_id = null;
             }
 
-            console.log(`Test ${test_id} ended by host ${user_id}`);
+            console.log(`battle ${battle_id} ended by host ${user_id}`);
         } catch (err) {
-            console.error('Error ending test:', err);
+            console.error('Error ending battle:', err);
         }
     });
 
-    socket.on('submit_test', async ({ test_id }) => {
-        await db.execute('UPDATE test_participant SET status="finished" WHERE test_id=? AND user_id=?', [test_id, user_id]);
-        socket.emit('test_submitted');
-        socket.to(test_id).emit('participant_finished', { userId: user_id });
+    socket.on('submit_battle', async ({ battle_id }) => {
+        await db.execute('UPDATE battle_participant SET status="finished" WHERE battle_id=? AND user_id=?', [battle_id, user_id]);
+        socket.emit('battle_submitted');
+        socket.to(battle_id).emit('participant_finished', { userId: user_id });
         socket.disconnect();
     });
     // --- 3. Joinee Events ---
-    socket.on('save_code', async ({ test_id, question_id, code, language }) => {
+    socket.on('save_battle_code', async ({ battle_id, battle_question_id, code, language }) => {
         // Save to DB
         await db.execute(`
-             INSERT INTO test_submissions (test_id, question_id, user_id, code, language)
+             INSERT INTO battle_submissions (battle_id, battle_question_id, user_id, code, language)
              VALUES (?, ?, ?, ?, ?)
              ON DUPLICATE KEY UPDATE code=?, language=?, last_updated=NOW()
-         `, [test_id, question_id, user_id, code, language, code, language]);
+         `, [battle_id, battle_question_id, user_id, code, language, code, language]);
 
         // Broadcast to Host so they can see it LIVE
         // We emit to the room; Host frontend will filter for the selected student
-        socket.to(test_id).emit('participant_code_update', {
+        socket.to(battle_id).emit('battle_participant_code_update', {
             userId: user_id,
-            questionId: question_id,
+            questionId: battle_question_id,
             code,
             language
         });
     });
 
     // New listener to broadcast score updates
-    socket.on('score_update', ({ test_id, score }) => {
+    socket.on('battle_score_update', ({ battle_id, score }) => {
         // Broadcast to the room (so Host sees it in the sidebar)
-        socket.to(test_id).emit('participant_score_update', {
+        socket.to(battle_id).emit('battle_participant_score_update', {
             userId: socket.user.user_id,
             score: score
         });
     });
+
+
+    socket.on('solved_question_first',({battle_id,user_id,battle_question_id})=>{
+        socket.to(battle_id).emit('move_to_next_question')
+    })
 }
