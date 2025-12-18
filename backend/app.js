@@ -82,6 +82,8 @@ import { editorRoute } from "./routes/editor.routes.js"
 app.use('/editor',editorRoute)
 import { testRouter } from "./routes/test.routes.js"
 app.use('/test',testRouter)
+import { battleRouter } from "./routes/battle.routes.js";
+app.use('/battle',battleRouter)
 
 import { testApi } from "./Utils/kafka_connection.js";
 app.use('/suhail',testApi)

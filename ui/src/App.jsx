@@ -14,11 +14,15 @@ import HostView from './pages/HostView';
 import JoinView from './pages/JoineeView';
 import HostTestView from './pages/HostTestView';
 import JoineeTestView from './pages/JoineeTestView';
-import MyTests from './pages/MyTests';
 import TestDetailsPage from './pages/TestDetails';
 import { useSocket } from './context/SocketContext';
 import HostBattleView from './pages/HostBattleView';
 import JoineeBattleView from './pages/JoineeBattleView';
+import TestsByMe from './pages/TestsByMe';
+import BattlesByMe from './pages/BattlesByMe';
+import BattleAnalysis from './pages/BattleAnalysis';
+import BattlesAttendedByMe from './pages/BattlesAttendedByMe';
+import TestsAttendedByMe from './pages/TestsAttendedByMe';
 
 // 1. Create the ProtectedRoute Component
 // This checks if a user exists. If not, it kicks them to '/login'.
@@ -69,8 +73,12 @@ function App() {
            <Route path="/joinView/:session_id" element={<JoinView />} />
            <Route path="/hostTestView/:test_id" element={<HostTestView />} />
            <Route path="/joineeTestView/:test_id" element={<JoineeTestView />} />
-           <Route path="/myTests" element={<MyTests />} />
+           <Route path="/testsByMe" element={<TestsByMe />} />
+           <Route path='/battlesByMe' element={<BattlesByMe/>}/>
+           <Route path='/battlesAttendedByMe' element={<BattlesAttendedByMe/>}/>
+           <Route path='/testsAttendedByMe' element={<TestsAttendedByMe/>}/>
            <Route path="/test-details/:test_id" element={<TestDetailsPage />} />
+           <Route path="/battle-details/:battle_id" element={<BattleAnalysis />} />
            <Route path="/hostBattleView/:session_id" element={<HostBattleView />} />
            <Route path="/joineeBattleView/:session_id" element={<JoineeBattleView />} />
         </Route>

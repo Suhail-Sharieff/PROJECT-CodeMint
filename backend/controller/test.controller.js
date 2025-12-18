@@ -42,7 +42,44 @@ const joinTest=
         
     }
 
-
+export const getTestsAttendedByMe=asyncHandler(
+    async(req,res)=>{
+        try{
+             const query=`WITH cte AS (
+                SELECT 
+                    x.test_id, x.user_id, z.name,z.email,x.role, x.status AS user_status, x.joined_at, x.score,
+                    y.host_id, y.title, y.status AS test_status, y.created_at, y.duration, y.start_time
+                FROM test_participant x 
+                LEFT JOIN test y ON x.test_id = y.test_id 
+                LEFT JOIN user z ON x.user_id=z.user_id
+                WHERE  x.user_id =? and x.user_id!=y.host_id
+            )
+            SELECT 
+                cte.test_id, cte.user_id, cte.name,cte.email,cte.role, cte.user_status, cte.joined_at, cte.score, 
+                cte.title, cte.duration, cte.start_time,
+                JSON_ARRAYAGG(
+                    JSON_OBJECT(
+                        'question_id', x.question_id,
+                        'question_title',m.title,
+                        'question_description',m.description,
+                        'question_example',m.example,
+                        'code', x.code,
+                        'language', x.language,
+                        'last_updated', x.last_updated,
+                        'time_taken_to_solve', TIMEDIFF(TIME(x.last_updated), TIME(cte.start_time)),
+						'score_for_this_question',x.score
+                    )
+                ) as submissions
+            FROM cte LEFT JOIN test_submissions x ON cte.test_id = x.test_id AND cte.user_id = x.user_id left join question m on x.question_id=m.question_id
+            GROUP BY cte.test_id, cte.user_id, cte.role, cte.user_status, cte.joined_at, cte.score, cte.title, cte.duration, cte.start_time
+            ORDER BY cte.score DESC;`
+            const [rows]=await db.execute(query,[req.user.user_id])
+            return res.status(200).json(new ApiResponse(200,rows,`Fetched user_id=${req.user.user_id} tests attended`))
+        }catch(err){
+            return res.status(400).json(new ApiError(400,err.message))
+        }
+    }
+)
 const getTestsByMe=asyncHandler(
     async(req,res)=>{
         try{

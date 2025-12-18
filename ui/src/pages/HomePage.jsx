@@ -160,16 +160,7 @@ const HomePage = () => {
           </div>
 
           {/* Quick Actions Bar */}
-          <div className="mb-8 flex gap-3">
-            <button
-              onClick={() => navigate('/myTests')}
-              className="px-6 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-semibold transition-all flex items-center gap-2"
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-              My Tests
-            </button>
-          </div>
-
+          <QuickActions/>
           {/* MAIN GRID - Changed to support 3 columns on large screens */}
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-8">
 
@@ -404,6 +395,80 @@ const HomePage = () => {
         </section>
       </div>
     )
+  );
+};
+import { FileCode, Trophy, Award, ChevronRight } from 'lucide-react';
+
+const QuickActions = () => {
+  const navigate = useNavigate();
+
+  const actions = [
+    {
+      title: "Tests Conducted",
+      subtitle: "Manage your assessments",
+      path: "/testsByMe",
+      icon: <FileCode size={24} />,
+      color: "text-blue-400",
+      bg: "bg-blue-400/10",
+      border: "hover:border-blue-500/50"
+    },
+    {
+      title: "Battles Conducted",
+      subtitle: "Host coding wars",
+      path: "/battlesByMe",
+      icon: <Swords size={24} />,
+      color: "text-red-500",
+      bg: "bg-red-500/10",
+      border: "hover:border-red-500/50"
+    },
+    {
+      title: "Tests Attended",
+      subtitle: "View your results",
+      path: "/testsAttendedByMe",
+      icon: <Award size={24} />,
+      color: "text-purple-400",
+      bg: "bg-purple-400/10",
+      border: "hover:border-purple-500/50"
+    },
+    {
+      title: "Battles Attended",
+      subtitle: "Combat history",
+      path: "/battlesAttendedByMe",
+      icon: <Trophy size={24} />,
+      color: "text-yellow-500",
+      bg: "bg-yellow-500/10",
+      border: "hover:border-yellow-500/50"
+    }
+  ];
+
+  return (
+    <div className="mb-8">
+      <h2 className="text-xl font-bold text-white mb-4 px-1">Quick Actions</h2>
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        {actions.map((item, idx) => (
+          <button
+            key={idx}
+            onClick={() => navigate(item.path)}
+            className={`group flex items-center justify-between p-4 rounded-xl bg-[#161B22] border border-gray-800 transition-all duration-300 hover:bg-[#1c2128] hover:-translate-y-1 hover:shadow-lg ${item.border}`}
+          >
+            <div className="flex items-center gap-4">
+              <div className={`p-3 rounded-lg ${item.bg} ${item.color}`}>
+                {item.icon}
+              </div>
+              <div className="text-left">
+                <div className="font-bold text-gray-200 group-hover:text-white transition-colors">
+                  {item.title}
+                </div>
+                <div className="text-xs text-gray-500 font-medium">
+                  {item.subtitle}
+                </div>
+              </div>
+            </div>
+            <ChevronRight size={16} className="text-gray-600 group-hover:text-white transition-colors" />
+          </button>
+        ))}
+      </div>
+    </div>
   );
 };
 

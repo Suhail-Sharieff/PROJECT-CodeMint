@@ -106,14 +106,26 @@ const submitCode = asyncHandler(async (req, res) => {
             
             // Update Battle Submissions
             await db.execute(`
-                INSERT INTO battle_submissions (battle_id, battle_question_id, user_id, code, language)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO battle_submissions (battle_id, battle_question_id, user_id, code, language, score)
+                VALUES (?, ?, ?, ?, ?, ?)
                 ON DUPLICATE KEY UPDATE 
                     code = VALUES(code),
                     language = VALUES(language),
+                    score = GREATEST(score, VALUES(score)),
                     last_updated = NOW()
-            `, [battle_id, question_id, user_id, source_code, language_id]);
+            `, [battle_id, question_id, user_id, source_code, language_id,questionScore]);
 
+            const [sumRows] = await db.execute('SELECT SUM(score) as total_score FROM battle_submissions WHERE battle_id = ? AND user_id = ?', [battle_id, user_id]);
+            const finalTotalScore = parseInt(sumRows[0].total_score) || 0;
+            console.log(`final total score=${finalTotalScore}`,sumRows);
+            await produceEvent(Topics.DB_TOPIC, {
+                type: Events.DB_QUERY.type,
+                payload: {
+                    desc: `updating battle_participant score user=${user_id}`,
+                    query: `UPDATE battle_participant SET score = ? WHERE battle_id = ? AND user_id = ?`,
+                    params: [finalTotalScore, battle_id, user_id]
+                }
+            });
             // Note: Battles often care about the specific question status (100% pass)
             // rather than a cumulative total score across questions like Tests do.
             return res.status(200).json({ results, score: questionScore, type: 'battle' });

@@ -6,7 +6,7 @@ import {
   Search, Loader2, AlertCircle, FileText 
 } from 'lucide-react';
 
-const MyTests = () => {
+const TestsByMe = () => {
   const navigate = useNavigate();
   const [tests, setTests] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -18,7 +18,7 @@ const MyTests = () => {
     const fetchTests = async () => {
       try {
         setLoading(true);
-        const response = await api.get('/test/getMyTests');
+        const response = await api.get('/test/getTestsByMe');
         // Sort by newest created first
         const sortedTests = response.data.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
         setTests(sortedTests);
@@ -190,4 +190,4 @@ const MyTests = () => {
   );
 };
 
-export default MyTests;
+export default TestsByMe;

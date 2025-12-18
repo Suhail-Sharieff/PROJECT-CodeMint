@@ -184,6 +184,7 @@ CREATE TABLE IF NOT EXISTS battle_submissions (
     battle_question_id INT,
     user_id INT,
     code MEDIUMTEXT,
+    score INT DEFAULT 0,
     language VARCHAR(50) DEFAULT 'javascript',
     last_updated DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (battle_id, battle_question_id, user_id),

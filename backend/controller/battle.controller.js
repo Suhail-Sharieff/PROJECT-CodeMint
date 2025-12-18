@@ -2,16 +2,109 @@ import { v4 as uuidv4 } from "uuid";
 import { db } from "../Utils/sql_connection.js";
 import { Server, Socket } from "socket.io"
 import { ApiError } from "../Utils/Api_Error.utils.js";
+import { asyncHandler } from "../Utils/AsyncHandler.utils.js";
+import { ApiResponse } from "../Utils/Api_Response.utils.js";
 
 
+export const getBattlesByMe = asyncHandler(
+    async (req, res) => {
+        try {
+            const { user_id } = req.user;
+            if (!user_id) throw new ApiError(400, 'Unauthorized acess!')
+            const [rows] = await db.execute('select * from battle where host_id=?', [user_id])
+            return res.status(200).json(rows)
+        } catch (err) {
+            return res.status(400).json(new ApiError(400, err.message))
+        }
+    }
+);
 
-const createbattle = async (user_id, battle_id,duration=10,title) => {
+export const getBattlesAttendedByMe=asyncHandler(
+    async(req,res)=>{
+        try{
+            const {user_id}=req.user
+            const query=`WITH cte AS (
+                SELECT 
+                    x.battle_id, x.user_id, z.name,z.email,x.role, x.status AS user_status, x.joined_at, x.score,
+                    y.host_id, y.title, y.status AS battle_status, y.created_at, y.duration, y.start_time
+                FROM battle_participant x 
+                LEFT JOIN battle y ON x.battle_id = y.battle_id 
+                LEFT JOIN user z ON x.user_id=z.user_id
+                WHERE  x.user_id =? and x.user_id!=y.host_id
+            )
+            SELECT 
+                cte.battle_id, cte.user_id, cte.name,cte.email,cte.role, cte.user_status, cte.joined_at, cte.score, 
+                cte.title, cte.duration, cte.start_time,
+                JSON_ARRAYAGG(
+                    JSON_OBJECT(
+                        'battle_question_id', x.battle_question_id,
+                        'battle_question_title',m.title,
+                        'battle_question_description',m.description,
+                        'battle_question_example',m.example,
+                        'code', x.code,
+                        'language', x.language,
+                        'last_updated', x.last_updated,
+                        'time_taken_to_solve', TIMEDIFF(TIME(x.last_updated), TIME(cte.start_time)),
+						'score_for_this_question',x.score
+                    )
+                ) as submissions
+            FROM cte LEFT JOIN battle_submissions x ON cte.battle_id = x.battle_id AND cte.user_id = x.user_id LEFT JOIN battle_question m ON x.battle_question_id = m.battle_question_id
+            GROUP BY cte.battle_id, cte.user_id, cte.role, cte.user_status, cte.joined_at, cte.score, cte.title, cte.duration, cte.start_time
+            ORDER BY cte.score DESC;`
+            const [rows]=await db.execute(query,[user_id])
+            return res.status(200).json(new ApiResponse(200,rows,`Fetched battles user_id=${user_id} attended !`))
+        }catch(err){
+            return res.status(400).json(new ApiError(400,err.message))
+        }
+    }
+)
+
+export const getBattleAnalysis = asyncHandler(
+    async (req, res) => {
+        try {
+            const { battle_id } = req.query
+            if (!battle_id) throw new ApiError(400, `battle_id not provided in params for its analysis!`)
+            const query = `WITH cte AS (
+                SELECT 
+                    x.battle_id, x.user_id, z.name,z.email,x.role, x.status AS user_status, x.joined_at, x.score,
+                    y.host_id, y.title, y.status AS battle_status, y.created_at, y.duration, y.start_time
+                FROM battle_participant x 
+                LEFT JOIN battle y ON x.battle_id = y.battle_id 
+                LEFT JOIN user z ON x.user_id=z.user_id
+                WHERE x.battle_id = ? AND x.user_id != y.host_id
+            )
+            SELECT 
+                cte.battle_id, cte.user_id, cte.name,cte.email,cte.role, cte.user_status, cte.joined_at, cte.score, 
+                cte.title, cte.duration, cte.start_time,
+                JSON_ARRAYAGG(
+                    JSON_OBJECT(
+                        'battle_question_id', x.battle_question_id,
+                        'code', x.code,
+                        'language', x.language,
+                        'last_updated', x.last_updated,
+                        'time_taken_to_solve', TIMEDIFF(TIME(x.last_updated), TIME(cte.start_time))
+                    )
+                ) as submissions
+            FROM cte 
+            LEFT JOIN battle_submissions x ON cte.battle_id = x.battle_id AND cte.user_id = x.user_id
+            GROUP BY cte.battle_id, cte.user_id, cte.role, cte.user_status, cte.joined_at, cte.score, cte.title, cte.duration, cte.start_time
+            ORDER BY cte.score DESC;`
+            const [rows] = await db.execute(query, [battle_id])
+            return res.status(200).json(new ApiResponse(200, rows, `Fetched battle anaysis of battle_id=${battle_id}`))
+        } catch (error) {
+            return res.status(400).json(new ApiError(400, error.message))
+        }
+    }
+)
+
+
+const createbattle = async (user_id, battle_id, duration = 10, title) => {
     try {
         if (!user_id) throw new ApiError(400, `No user_id provided by SocketManager to create battle!`)
         if (!battle_id) throw new ApiError(400, `No battle_id provided by SocketManager to create battle!`)
 
         const query = 'insert into battle (battle_id,host_id,duration,title) values(?,?,?,?)'
-        const [rows] = await db.execute(query, [battle_id,user_id,duration,title])
+        const [rows] = await db.execute(query, [battle_id, user_id, duration, title])
         if (rows.length === 0) throw new ApiError(400, "Unabe to create battle!")
 
 
@@ -22,22 +115,22 @@ const createbattle = async (user_id, battle_id,duration=10,title) => {
         throw new ApiError(400, e.message);
     }
 }
-const joinbattle=
-    async(user_id,battle_id)=>{
-       try{
-            if(!battle_id) throw new ApiError(400,"Socket manager didnt provide battle_id to join battle!")
-            if(!user_id) throw new ApiError(400,"Socket manager didnt provide user_id to join battle!")
+const joinbattle =
+    async (user_id, battle_id) => {
+        try {
+            if (!battle_id) throw new ApiError(400, "Socket manager didnt provide battle_id to join battle!")
+            if (!user_id) throw new ApiError(400, "Socket manager didnt provide user_id to join battle!")
 
-            const query='insert into battle_participant(battle_id,user_id) values (?,?)'
-            const [rows]=await db.execute(query,[battle_id,user_id])
-            
+            const query = 'insert into battle_participant(battle_id,user_id) values (?,?)'
+            const [rows] = await db.execute(query, [battle_id, user_id])
+
             console.log(`User id = ${user_id} joined battle_id = ${battle_id}`);
-            
 
-       }catch(e){
-           throw new ApiError(400, e.message);
-       }
-        
+
+        } catch (e) {
+            throw new ApiError(400, e.message);
+        }
+
     }
 
 /**
@@ -68,7 +161,7 @@ export const setupBattleEvents = async (io, socket) => {
         const battle_id = uuidv4();
         // Default to 60 if not provided, ensure it is INT
         console.log('battle creation');
-        
+
         const finalDuration = parseInt(duration) || 60;
 
         await createbattle(user_id, battle_id, finalDuration, title);
@@ -232,9 +325,9 @@ export const setupBattleEvents = async (io, socket) => {
     // --- 3. Joinee Events ---
     socket.on('save_battle_code', async (data) => {
         // Save to DB
-        const { battle_id, battle_question_id, code, language }=data
+        const { battle_id, battle_question_id, code, language } = data
         console.log(data);
-        
+
         await db.execute(`
              INSERT INTO battle_submissions (battle_id, battle_question_id, user_id, code, language)
              VALUES (?, ?, ?, ?, ?)
@@ -261,7 +354,7 @@ export const setupBattleEvents = async (io, socket) => {
     });
 
 
-    socket.on('solved_question_first',({battle_id,user_id,battle_question_id})=>{
+    socket.on('solved_question_first', ({ battle_id, user_id, battle_question_id }) => {
         socket.to(battle_id).emit('move_to_next_question')
     })
 }
