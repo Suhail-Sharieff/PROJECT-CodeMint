@@ -1,24 +1,35 @@
 // src/App.jsx
 
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, Outlet } from 'react-router-dom'; // Added Outlet
 import { useAuth } from './context/AuthContext';
 import { CircularProgress, Box } from '@mui/material';
 
 // --- Component and Page Imports ---
 import Layout from './components/Layout';
-import Navbar from './components/Navbar'; // <--- ADDED THIS IMPORT
 import HomePage from './pages/HomePage';
 import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
-import CodeEditor from './pages/CodeEditor'; // Ensure this path matches where you saved CodeEditor
-import TempEditor from './pages/TempEditor';
+import SoloEditor from './components/SoloEditor';
 import HostView from './pages/HostView';
 import JoinView from './pages/JoineeView';
-import SoloEditor from './components/SoloEditor';
 import HostTestView from './pages/HostTestView';
 import JoineeTestView from './pages/JoineeTestView';
 import MyTests from './pages/MyTests';
 import TestDetailsPage from './pages/TestDetails';
+
+// 1. Create the ProtectedRoute Component
+// This checks if a user exists. If not, it kicks them to '/login'.
+const ProtectedRoute = () => {
+  const { user } = useAuth();
+  
+  // If not logged in, redirect to login page
+  if (!user) {
+    return <Navigate to="/login" replace />;
+  }
+
+  // If logged in, render the child routes (The Outlet)
+  return <Outlet />;
+};
 
 function App() {
   const { user, isLoading } = useAuth();
@@ -34,7 +45,7 @@ function App() {
   return (
     <Router>
       <Routes>
-        {/* Public/Marketing Pages (Wrapped in standard Layout with Footer) */}
+        {/* --- Public Routes --- */}
         <Route element={<Layout />}>
           <Route path="/" element={<HomePage />} />
           <Route 
@@ -47,13 +58,18 @@ function App() {
           />
         </Route>
 
-       <Route path="/editor" element={<SoloEditor/>} />
-       <Route path="/hostView/:session_id" element={<HostView />} />
-       <Route path="/joinView/:session_id" element={<JoinView />} />
-       <Route path="/hostTestView/:test_id" element={<HostTestView />} />
-        <Route path="/joineeTestView/:test_id" element={<JoineeTestView />} />
-        <Route path="/myTests" element={<MyTests />} />
-        <Route path="/test-details/:test_id" element={<TestDetailsPage />} />
+        {/* --- Protected Routes --- */}
+        {/* Any route inside this wrapper is SECURE. You must be logged in to see them. */}
+        <Route element={<ProtectedRoute />}>
+           <Route path="/editor" element={<SoloEditor/>} />
+           <Route path="/hostView/:session_id" element={<HostView />} />
+           <Route path="/joinView/:session_id" element={<JoinView />} />
+           <Route path="/hostTestView/:test_id" element={<HostTestView />} />
+           <Route path="/joineeTestView/:test_id" element={<JoineeTestView />} />
+           <Route path="/myTests" element={<MyTests />} />
+           <Route path="/test-details/:test_id" element={<TestDetailsPage />} />
+        </Route>
+
       </Routes>
     </Router>
   );
