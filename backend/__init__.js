@@ -192,6 +192,16 @@ CREATE TABLE IF NOT EXISTS battle_submissions (
     FOREIGN KEY (battle_question_id) REFERENCES battle_question(battle_question_id) ON DELETE CASCADE,
     FOREIGN KEY (user_id) REFERENCES user(user_id) ON DELETE CASCADE
 );
+
+-- Kafka dead letter queue, stores those kafka events that failed
+CREATE TABLE IF NOT EXISTS kafka_dlq (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    topic VARCHAR(255),
+    payload JSON,
+    error_message TEXT,
+    retry_count INT DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 `;
 
 export { init_query };

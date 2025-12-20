@@ -1,33 +1,57 @@
-import { Kafka } from "kafkajs";
+import { Kafka, Partitioners } from "kafkajs"; // [FIX] Added Partitioners
 import { asyncHandler } from "./AsyncHandler.utils.js";
 import { Events, Topics } from "./kafka_events.js";
+import { db } from "./sql_connection.js"; 
+import { ApiResponse } from "./Api_Response.utils.js";
+import { processDLQ } from "./dlq_worker.js";
+
 const eventRegistry = Object.fromEntries(
     Object.entries(Events).map(([key, { type, handler }]) => [type, handler])
 );
 
-const topicsToCreate=Object.values(Topics)
+const topicsToCreate = Object.values(Topics);
 
-const kafkaOrigin = process.env.KAFKA_ORIGIN;
+// Broker Parsing Logic
+const kafkaOrigin = process.env.KAFKA_ORIGIN
 const rawBrokers = kafkaOrigin.split(',').map(broker => broker.trim()).filter(broker => broker);
-
 const parseBroker = (broker) => {
     if (broker.startsWith('http://') || broker.startsWith('https://')) {
         return broker.replace(/^https?:\/\//, '');
     }
     return broker;
 };
-
 const brokers = rawBrokers.map(parseBroker);
 
+// Kafka Configuration
 const kafka = new Kafka({
     clientId: "codemint_kafka_clientId",
     brokers: brokers,
-    retry: { initialRetryTime: 100, retries: 8 },
+    // Retry Logic
+    retry: { 
+        initialRetryTime: 300, 
+        retries: 10 
+    },
 });
 
 const admin = kafka.admin();
-const producer = kafka.producer();
+const producer = kafka.producer({
+    createPartitioner: Partitioners.LegacyPartitioner,
+    idempotent: true, // to Prevent duplicates
+    allowAutoTopicCreation: false,
+});
 const consumer = kafka.consumer({ groupId: "codemint_kafka_groupId" });
+
+// --- DLQ(Dead letter queue to manage failed events)
+const saveToDeadLetterQueue = async (topic, data, errorMsg) => {
+    try {
+        console.warn(`⚠️ Kafka Down. Saving to DLQ table for topic: ${topic}`);
+        const query = `INSERT INTO kafka_dlq (topic, payload, error_message) VALUES (?, ?, ?)`;
+        await db.execute(query, [topic, JSON.stringify(data), errorMsg]);
+        console.log("✅ Message safely backed up in DLQ.");
+    } catch (dbErr) {
+        console.error("☠️ CRITICAL: Failed to save to DLQ. Data potential loss.", dbErr);
+    }
+};
 
 export const connectKafka = async () => {
     try {
@@ -35,7 +59,7 @@ export const connectKafka = async () => {
         await admin.connect();
         await producer.connect();
 
-        // 2. CHECK & CREATE TOPICS
+        // CHECK & CREATE TOPICS
         const existingTopics = await admin.listTopics();
         const newTopics = topicsToCreate
             .filter(t => !existingTopics.includes(t))
@@ -52,10 +76,13 @@ export const connectKafka = async () => {
         }
 
         console.log("✅ Kafka Admin & Producer Ready. Subscribing all topics.......");
-
-        // Start Consumer ONLY ONCE, and ONLY after topics exist
         await startDynamicConsumer(topicsToCreate);
-
+        // every 10 minutes we will try processing failed events
+        setInterval(() => {
+            processDLQ();
+        }, 10 * 60 * 1000);
+        console.log(`✅ DLQ(dead letter queue) worker started`);
+        
     } catch (err) {
         console.error("❌ Kafka Connection Error:", err);
     }
@@ -63,24 +90,36 @@ export const connectKafka = async () => {
 
 export const produceEvent = async (topic, data) => {
     try {
-        console.log(`📤 KAFKA produced into topic=[${topic}]`);
+        console.log(`📤 KAFKA producing into topic=[${topic}]`);
+        
+        // [STRATEGY] Backpressure & Reliability
+        // acks: -1 ensures leader and replicas confirm receipt
         await producer.send({
             topic,
-            messages: [{ value: JSON.stringify(data) }],
+            messages: [{ 
+                key: data.session_id ? String(data.session_id) : undefined, // Optional: ensures ordering per session
+                value: JSON.stringify(data) 
+            }],
+            acks: -1, 
         });
+
     } catch (err) {
-        console.error(`Error producing to ${topic}:`, err);
+        console.error(`❌ Error producing to ${topic}:`, err.message);
+        // [STRATEGY] Fallback to DLQ if Kafka is unreachable
+        await saveToDeadLetterQueue(topic, data, err.message);
     }
 };
 
 export const startDynamicConsumer = async (topics) => {
     try {
         await consumer.connect();
-        
         await consumer.subscribe({ topics: topics, fromBeginning: true });
 
         await consumer.run({
+            // [STRATEGY] Disable auto-commit to manually control success
+            autoCommit: false, 
             eachMessage: async ({ topic, partition, message }) => {
+                const offset = message.offset;
                 try {
                     const parsedMsg = JSON.parse(message.value.toString());
                     const { type, payload } = parsedMsg;
@@ -88,28 +127,35 @@ export const startDynamicConsumer = async (topics) => {
                     const handler = eventRegistry[type];
 
                     if (handler) {
-                        console.log("============================================");
-                        console.log(`📤 KAFKA consumed from topic=[${topic}] event_type: [${type}] desc_of_event: [${JSON.stringify(payload.desc)}]`);
+                        console.log(`📥 Processing [${type}] from [${topic}]`);
                         await handler(payload);
-                        console.log("============================================");
+                        
+                        // Commit ONLY if successful
+                        await consumer.commitOffsets([{ topic, partition, offset: (BigInt(offset) + 1n).toString() }]);
                     } else {
-                        console.warn(`⚠️ No handler found for event type: [${type}]`);
+                        console.warn(`⚠️ No handler for event type: [${type}]`);
+                        // Commit anyway to skip unknown messages preventing block
+                        await consumer.commitOffsets([{ topic, partition, offset: (BigInt(offset) + 1n).toString() }]);
                     }
 
                 } catch (processingError) {
-                    console.error("❌ Error processing message:", processingError);
+                    console.error(`❌ Consumer Error on topic ${topic}:`, processingError.message);
+                    
+                    // [STRATEGY] Decision: Do we block or skip?
+                    // For now, we Log & Skip (Commit) so we don't crash the specific partition.
+                    // Ideally, you would write THIS to a "Consumer DLQ" here.
+                    await consumer.commitOffsets([{ topic, partition, offset: (BigInt(offset) + 1n).toString() }]);
                 }
             },
         });
-        console.log("✅ Kafka Consumer subscribed all topics. Listening all events of each.... ");
+        console.log("✅ Kafka Consumer listening...");
     } catch (err) {
         console.error("❌ Error starting consumer:", err);
     }
 };
 
-import { ApiResponse } from "./Api_Response.utils.js";
-
 export const testApi = asyncHandler(async(req, res) => {
+    // This simulates your API endpoint triggering an event
     await produceEvent(Topics.DB_TOPIC, {
         type: Events.DB_QUERY.type, 
         payload: { 
@@ -119,5 +165,5 @@ export const testApi = asyncHandler(async(req, res) => {
         }
     });
 
-    return res.status(200).json(new ApiResponse(200, "Event Dispatched!"));
+    return res.status(200).json(new ApiResponse(200, "Event Dispatched (or Saved to DLQ)!"));
 });

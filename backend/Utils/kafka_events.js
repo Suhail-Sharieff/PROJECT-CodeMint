@@ -2,6 +2,7 @@ import { db } from "./sql_connection.js";
 
 const handleDbQuery = async (payload) => {
     try {
+        if(!query || !params ) throw Error(`Query | params not passed to exec DB query `)
         const { query, params} = payload;
         await db.execute(query, params); 
     } catch (error) {
