@@ -382,6 +382,7 @@ const JoineeBattleView = () => {
             onLanguageChange={setCurrentLang}
             initialTestCases={currentQuestionTestCases}
             onScoreUpdate={handleLocalScoreUpdate} // <--- HOOKED UP TO RACE LOGIC
+            isBattle:true
           />
         </div>
       </div>

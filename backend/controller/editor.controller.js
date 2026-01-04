@@ -31,7 +31,7 @@ const constants_body = {
 };
 
 const submitCode = asyncHandler(async (req, res) => {
-    const { language_id, source_code, stdin, expected_output, question_id } = req.body;
+    const { language_id, source_code, stdin, expected_output, question_id,isBattle=false } = req.body;
     const user_id = req.user.user_id;
 
     if (!language_id || !source_code) throw new ApiError(400, "language_id/source_code missing!");
@@ -49,8 +49,11 @@ const submitCode = asyncHandler(async (req, res) => {
         // --- SCENARIO 2: Test OR Battle Submission ---
         
         // 1. Determine Context (Check if it's a Battle Question or a Test Question)
-        const [battleQ] = await db.execute('SELECT battle_id FROM battle_question WHERE battle_question_id = ?', [question_id]);
-        const isBattle = battleQ.length > 0;
+        // const [battleQ] = await db.execute('SELECT battle_id FROM battle_question WHERE battle_question_id = ?', [question_id]);
+
+        // console.log(battleQ);
+        
+        // const isBattle = battleQ.length > 0;
 
         // 2. Fetch Test Cases from correct table
         let dbCases;
@@ -100,6 +103,11 @@ const submitCode = asyncHandler(async (req, res) => {
         const results = await Promise.all(promises);
         const questionScore = Math.round((passedCount / dbCases.length) * 100);
 
+        // console.log(results);
+        
+        console.log(`IS BATTLE: ${isBattle}`);
+        
+
         // 4. Update Database based on Context
         if (isBattle) {
             const battle_id = battleQ[0].battle_id;
@@ -117,7 +125,7 @@ const submitCode = asyncHandler(async (req, res) => {
 
             const [sumRows] = await db.execute('SELECT SUM(score) as total_score FROM battle_submissions WHERE battle_id = ? AND user_id = ?', [battle_id, user_id]);
             const finalTotalScore = parseInt(sumRows[0].total_score) || 0;
-            console.log(`final total score=${finalTotalScore}`,sumRows);
+            console.log(`final total battle score=${finalTotalScore}`,sumRows);
             await produceEvent(Topics.DB_TOPIC, {
                 type: Events.DB_QUERY.type,
                 payload: {
@@ -147,7 +155,7 @@ const submitCode = asyncHandler(async (req, res) => {
 
             const [sumRows] = await db.execute('SELECT SUM(score) as total_score FROM test_submissions WHERE test_id = ? AND user_id = ?', [test_id, user_id]);
             const finalTotalScore = parseInt(sumRows[0].total_score) || 0;
-
+            console.log(`final total test score=${finalTotalScore}`,sumRows);
             await produceEvent(Topics.DB_TOPIC, {
                 type: Events.DB_QUERY.type,
                 payload: {

@@ -29,7 +29,8 @@ const CodeEditor = ({
   readOnly = false,
   initialTestCases,
   onScoreUpdate,
-  questionId
+  questionId,
+  isBattle=false
 }) => {
   // --- Refs for Debouncing ---
   const editorRef = useRef(null);
@@ -278,7 +279,8 @@ const CodeEditor = ({
         const response = await api.post(`/editor/submitCode`, {
           language_id,
           source_code: value, // Uses current prop value (should be synced)
-          question_id: questionId
+          question_id: questionId,
+          isBattle:isBattle
         });
         responseData = response.data;
       }
@@ -288,7 +290,8 @@ const CodeEditor = ({
             language_id,
             source_code: value,
             stdin: testCase.input,
-            expected_output: testCase.expected
+            expected_output: testCase.expected,
+            isBattle:isBattle
           }).then(res => ({
             ...res.data,
             testCaseId: testCase.id,
