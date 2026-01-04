@@ -46,7 +46,7 @@ const JoineeBattleView = () => {
         setParticipants(
           state.users
             .filter((u) => u.role !== "host")
-            .map((u) => ({ ...u, score: u.score || 0 }))
+            .map((u) => ({ ...u, score: u.total_score || 0 }))
         );
       }
 
@@ -85,7 +85,10 @@ const JoineeBattleView = () => {
       });
     };
 
-    const handleScoreUpdate = ({ userId, score }) => {
+    const handleScoreUpdate = (data) => {
+      const { userId, score }=data
+      console.log(data);
+      
       setParticipants((prev) =>
         prev.map((p) => (p.id === userId ? { ...p, score: score } : p))
       );
@@ -158,7 +161,7 @@ const JoineeBattleView = () => {
 
   const handleLocalScoreUpdate = (score) => {
     // 1. Broadcast score
-    socket.emit("battle_score_update", { battle_id, score });
+    socket.emit("battle_score_update", { battle_id, battle_question_id: battleData.questions[activeQIndex].battle_question_id, score });
 
     // 2. CHECK WIN CONDITION (RACE)
     // Assuming 100 is the max score for "Accepted"
@@ -382,7 +385,7 @@ const JoineeBattleView = () => {
             onLanguageChange={setCurrentLang}
             initialTestCases={currentQuestionTestCases}
             onScoreUpdate={handleLocalScoreUpdate} // <--- HOOKED UP TO RACE LOGIC
-            isBattle:true
+            isBattle={true}
           />
         </div>
       </div>

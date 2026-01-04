@@ -37,6 +37,9 @@ const CodeEditor = ({
   const latestValueRef = useRef(value || "");
   const timerRef = useRef(null);
 
+  // console.log(isBattle);
+  
+
   // --- State ---
   const [activeTab, setActiveTab] = useState('testcase');
   const [testCases, setTestCases] = useState([{ id: 1, input: '', expected: '', is_hidden: 0 }]);
@@ -285,6 +288,8 @@ const CodeEditor = ({
         responseData = response.data;
       }
       else {
+        if(isBattle) console.log("Battle run ");
+        
         const promises = testCases.map(testCase =>
           api.post(`/editor/submitCode`, {
             language_id,

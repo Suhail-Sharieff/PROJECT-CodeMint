@@ -49,7 +49,7 @@ const submitCode = asyncHandler(async (req, res) => {
         // --- SCENARIO 2: Test OR Battle Submission ---
         
         // 1. Determine Context (Check if it's a Battle Question or a Test Question)
-        // const [battleQ] = await db.execute('SELECT battle_id FROM battle_question WHERE battle_question_id = ?', [question_id]);
+        
 
         // console.log(battleQ);
         
@@ -110,7 +110,9 @@ const submitCode = asyncHandler(async (req, res) => {
 
         // 4. Update Database based on Context
         if (isBattle) {
+             const [battleQ] = await db.execute('SELECT battle_id FROM battle_question WHERE battle_question_id = ?', [question_id]);
             const battle_id = battleQ[0].battle_id;
+           
             
             // Update Battle Submissions
             await db.execute(`

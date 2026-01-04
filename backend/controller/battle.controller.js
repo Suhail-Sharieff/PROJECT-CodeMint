@@ -233,7 +233,7 @@ export const setupBattleEvents = async (io, socket) => {
             }
 
             // 7. Users & 8. Time
-            const [users] = await db.execute('SELECT u.user_id as id, u.name, tp.role, tp.status FROM battle_participant tp JOIN user u ON tp.user_id = u.user_id WHERE tp.battle_id = ?', [battle_id]);
+            const [users] = await db.execute('SELECT u.user_id as id, u.name, tp.role, tp.status, COALESCE(SUM(bs.score), 0) as total_score FROM battle_participant tp JOIN user u ON tp.user_id = u.user_id LEFT JOIN battle_submissions bs ON bs.battle_id = tp.battle_id AND bs.user_id = tp.user_id WHERE tp.battle_id = ? GROUP BY u.user_id, u.name, tp.role, tp.status', [battle_id]);
 
             let timeLeft = null;
             if (battleMeta.status === 'LIVE' && battleMeta.start_time) {
@@ -345,11 +345,17 @@ export const setupBattleEvents = async (io, socket) => {
     });
 
     // New listener to broadcast score updates
-    socket.on('battle_score_update', ({ battle_id, score }) => {
+    socket.on('battle_score_update', async ({ battle_id, battle_question_id, score }) => {
+        // Update score for the specific question
+        await db.execute('UPDATE battle_submissions SET score = ? WHERE battle_id = ? AND battle_question_id = ? AND user_id = ?', [score, battle_id, battle_question_id, socket.user.user_id]);
+        
+        // Calculate total score from DB
+        const [sumRows] = await db.execute('SELECT SUM(score) as total_score FROM battle_submissions WHERE battle_id = ? AND user_id = ?', [battle_id, socket.user.user_id]);
+        const totalScore = parseInt(sumRows[0].total_score) || 0;
         // Broadcast to the room (so Host sees it in the sidebar)
-        socket.to(battle_id).emit('battle_participant_score_update', {
+        io.to(battle_id).emit('battle_participant_score_update', {
             userId: socket.user.user_id,
-            score: score
+            score: totalScore
         });
     });
 
