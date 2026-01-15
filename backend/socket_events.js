@@ -41,40 +41,14 @@ export function registerSocketEvents(io) {
 
         await setupSessionEvents(socket,io);
         await db.execute('UPDATE user SET socket_id=? WHERE user_id=?', [socket.id, socket.user.user_id]);
-        await setupTestEvents(socket,io); // Initializes the join_test listener
+        await setupTestEvents(socket,io);
         await setupBattleEvents(io,socket)
-        // --- GLOBAL DISCONNECT HANDLER ---
+
         socket.on('disconnect', async () => {
             if (!socket.user) return;
             console.log(`🔌 User disconnected: ${socket.user.name} (${socket.id})`);
-            const { user_id } = socket.user;
+            // const { user_id } = socket.user;
 
-            // 1. Handle LIVE SESSION Disconnect (Delete & Notify)
-            if (socket.current_session_id) {
-                const session_id = socket.current_session_id;
-                try {
-                    // Remove from participant list (Sessions are ephemeral)
-                    await db.execute('DELETE FROM session_participant WHERE session_id=? AND user_id=?', [session_id, user_id]);
-                    io.to(session_id).emit('joinee_left', user_id);
-                } catch (err) {
-                    console.error("Error handling session disconnect:", err);
-                }
-            }
-
-            // 2. Handle TEST Disconnect (Notify Only)
-            if (socket.current_test_id) {
-                const test_id = socket.current_test_id;
-                try {
-                    // NOTE: We DO NOT delete from 'test_participant' because they might be reloading!
-                    // We just tell the Host "Hey, this user is offline now".
-
-                    io.to(test_id).emit('joinee_left', user_id);
-                    console.log(`User ${user_id} disconnected from test ${test_id}`);
-
-                } catch (err) {
-                    console.error("Error handling test disconnect:", err);
-                }
-            }
         });
 
     });

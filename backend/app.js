@@ -7,7 +7,6 @@ import cors from "cors"
 const app = express()
 
 
-// at top of file already: import cors from "cors"
 const allowedOrigins = (process.env.CORS_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean);
 
 app.use(cors({
