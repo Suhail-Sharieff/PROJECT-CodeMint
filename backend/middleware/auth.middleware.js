@@ -15,14 +15,13 @@ export const verifyJWT = (req, res, next) => {
     // Verify token
     const decoded = jwt.verify(token, process.env.ACCESS_TOKEN_SECRET);
 
-    // Attach decoded pharmacist details to req
+    // attaching decoded user details to req, if "decoded" has all details in it like user_id,email,name, if no, then obviouly below section will throw error, so JWT is not verified
     req.user = {
       user_id: decoded.user_id,
       email: decoded.email,
       name: decoded.name,
     };
 
-    // console.log("✅ JWT verified, pharmacist attached:", req.pharmacist);
     console.log(`✅ JWT verified 'user' can be now accesed using req.user `);
     next();
   } catch (err) {

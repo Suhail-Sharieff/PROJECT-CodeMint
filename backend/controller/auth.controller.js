@@ -27,7 +27,7 @@ const login=asyncHandler(
         .status(200)
         .cookie("accessToken", accessToken, {
             httpOnly: true,   
-            secure: process.env.NODE_ENV === "production"
+            secure: process.env.NODE_ENV === "production"//ensures the cookie is only sent over encrypted HTTPS connections,other wise anyone can access it using Javascript's document.cookie
         })
         .cookie("refreshToken", refreshToken, {
             httpOnly: true,
@@ -66,13 +66,12 @@ const register=asyncHandler(async(req,res)=>{
     }
 })
 
-// Get current user from token (for session restoration)
+//  current user i can get from token (for session restoration)
 const getCurrentUser = asyncHandler(async(req,res)=>{
     // req.user is set by verifyJWT middleware
     const user = req.user;
     if(!user) throw new ApiError(401,"User not authenticated");
     
-    // Get full user details from database
     const query = `SELECT user_id, name, email, phone FROM user WHERE user_id = ? LIMIT 1`;
     const [rows] = await db.execute(query, [user.user_id]);
     
