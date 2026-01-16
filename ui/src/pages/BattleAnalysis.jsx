@@ -19,7 +19,6 @@ const BattleAnalysis = () => {
   const [error, setError] = useState(null);
   const [battleMeta, setBattleMeta] = useState(null);
 
-  // --- Helper: Map Judge0 IDs to Names ---
   const getLanguageName = (id) => {
     const map = {
       "54": "C++",
@@ -32,7 +31,7 @@ const BattleAnalysis = () => {
     return map[id] || `ID: ${id}`;
   };
 
-  // --- Fetch Data ---
+  // data fetching
   useEffect(() => {
     const fetchDetails = async () => {
       try {
@@ -44,13 +43,13 @@ const BattleAnalysis = () => {
           setParticipants(data);
           
           if (data.length > 0) {
-            // Extract Meta from the first record
+            // meta will  from the first record asper my api
             setBattleMeta({
               title: data[0].title,
               start_time: data[0].start_time,
               duration: data[0].duration
             });
-            // Auto-select first user
+            // auto-select first user by default ie usr with highest points
             handleUserSelect(data[0]);
           }
         }
@@ -65,7 +64,6 @@ const BattleAnalysis = () => {
     if (battle_id) fetchDetails();
   }, [battle_id]);
 
-  // --- Handlers ---
   const handleUserSelect = (user) => {
     setSelectedUser(user);
     // Auto-select first submission if available
@@ -76,7 +74,6 @@ const BattleAnalysis = () => {
     }
   };
 
-  // --- Formatting Helpers ---
   const formatDate = (dateStr) => {
     if (!dateStr) return 'N/A';
     return new Date(dateStr).toLocaleString();
@@ -84,15 +81,14 @@ const BattleAnalysis = () => {
 
   const formatTimeTaken = (timeStr) => {
     if (!timeStr) return 'N/A';
-    return timeStr.split('.')[0]; // Remove microseconds
+    return timeStr.split('.')[0]; 
   };
 
-  // --- Render ---
 
   if (loading) return (
     <div className="min-h-screen bg-[#0D1117] flex items-center justify-center text-gray-400">
       <Loader2 className="w-8 h-8 animate-spin mb-2" />
-      <span className="ml-3">Loading Battle Report...</span>
+      <span className="ml-3">Loading Battle Report...Pls logout and login if loading persists!</span>
     </div>
   );
 

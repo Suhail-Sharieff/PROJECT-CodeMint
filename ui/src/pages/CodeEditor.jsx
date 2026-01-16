@@ -54,7 +54,7 @@ const CodeEditor = ({
   // --- DEBOUNCE LOGIC START ---
 
   // 1. Low-level emit (fire-and-forget)
-  const emitNow = useCallback((payload) => {
+  const emitNow = useCallback((payload) => {//prevents fn being created for eevery render
     if (!onEmit) return;
     try {
       onEmit(payload);

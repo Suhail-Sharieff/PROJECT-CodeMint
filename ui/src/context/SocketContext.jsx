@@ -1,4 +1,3 @@
-// src/context/SocketContext.jsx
 
 import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
 import { io } from 'socket.io-client';
@@ -15,7 +14,7 @@ export const SocketProvider = ({ children }) => {
   const socketRef = useRef(null);
 
   useEffect(() => {
-    // Only connect if user is logged in and we have an access token
+    // v will connect if user is logged in and we have an access token
     if (!user || !accessToken) {
       console.log('🔌 Socket: Waiting for user or token...', { 
         user: !!user, 
@@ -33,14 +32,14 @@ export const SocketProvider = ({ children }) => {
       return;
     }
 
-    // Don't reconnect if already connected
+    // v don't want to reconnect if already connected
     if (socketRef.current && socketRef.current.connected) {
       console.log('🔌 Socket already connected');
       setIsConnected(true);
       return;
     }
 
-    // Clean up existing socket if any
+    // resource clenup
     if (socketRef.current) {
       console.log('🔌 Cleaning up existing socket before reconnecting...');
       socketRef.current.removeAllListeners();
@@ -69,7 +68,7 @@ export const SocketProvider = ({ children }) => {
       reconnection: true,
       reconnectionDelay: 1000,
       reconnectionAttempts: 5,
-      forceNew: true, // Force a new connection
+      forceNew: true, // ====TODO, idk whether to establish a new conn or  not
     });
 
     socketRef.current = newSocket;
@@ -111,7 +110,6 @@ export const SocketProvider = ({ children }) => {
 
     setSocket(newSocket);
 
-    // Cleanup on unmount or when user/token changes
     return () => {
       console.log('🔌 Cleaning up socket connection...');
       if (socketRef.current) {
@@ -122,7 +120,7 @@ export const SocketProvider = ({ children }) => {
       setSocket(null);
       setIsConnected(false);
     };
-  }, [user, accessToken]); // Reconnect when user or token changes
+  }, [user, accessToken]); //dependcy on user,accessToken, coz if that changes we need to build conn again
 
   const value = {
     socket,
