@@ -42,6 +42,7 @@ services:
     env_file: judge0.conf
     <<: *default-logging
     restart: always
+  
   kafka_service:
     image: confluentinc/cp-kafka:7.8.3
     container_name: kafka_container
@@ -59,6 +60,31 @@ services:
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
       KAFKA_LOG_DIRS: /tmp/kraft-combined-logs
   
+  prometheus_server:
+    image: prom/prometheus
+    container_name: prometheus_container
+    ports:
+     - "9090:9090"
+    volumes:
+     - ./prometheus.yml:/etc/prometheus/prometheus.yml
+  
+  grafana_dashboard:
+    image: grafana/grafana-enterprise
+    container_name: grafana_ui_dashboard
+    ports:
+     - "8989:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_SECURITY_ADMIN_USER: admin
+      GF_USERS_ALLOW_SIGN_UP: 'false'
+    volumes:
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus_server
+    <<: *default-logging
+    restart: always
+  
 
 volumes:
   data:
+  grafana_data:

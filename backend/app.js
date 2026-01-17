@@ -2,7 +2,8 @@ import express from "express"
 import cookieParser from "cookie-parser"
 import cors from "cors"
 
-
+// --- PROMETHEUS METRICS MIDDLEWARE ---
+import { metricsMiddleware } from "./middleware/metrics.middleware.js";
 
 const app = express()
 
@@ -30,6 +31,9 @@ app.use(cors({
   methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"]
 }));
+
+// Apply metrics middleware early
+app.use(metricsMiddleware);
 
 
 //Allow json data transfer within app
@@ -86,6 +90,10 @@ app.use('/battle',battleRouter)
 
 import { testApi } from "./Utils/kafka_connection.js";
 app.use('/suhail',testApi)
+
+// --- PROMETHEUS METRICS ENDPOINT ---
+import { metricsHandler } from "./Utils/promethus_connection.utils.js";
+app.get('/metrics', metricsHandler);
 
 import { ApiError } from "./Utils/Api_Error.utils.js"
 app.use((err, req, res, next) => {
