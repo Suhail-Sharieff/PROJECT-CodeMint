@@ -29,12 +29,16 @@ const CodeEditor = ({
   readOnly = false,
   initialTestCases,
   onScoreUpdate,
-  questionId
+  questionId,
+  isBattle=false
 }) => {
   // --- Refs for Debouncing ---
   const editorRef = useRef(null);
   const latestValueRef = useRef(value || "");
   const timerRef = useRef(null);
+
+  // console.log(isBattle);
+  
 
   // --- State ---
   const [activeTab, setActiveTab] = useState('testcase');
@@ -50,7 +54,7 @@ const CodeEditor = ({
   // --- DEBOUNCE LOGIC START ---
 
   // 1. Low-level emit (fire-and-forget)
-  const emitNow = useCallback((payload) => {
+  const emitNow = useCallback((payload) => {//prevents fn being created for eevery render
     if (!onEmit) return;
     try {
       onEmit(payload);
@@ -278,17 +282,21 @@ const CodeEditor = ({
         const response = await api.post(`/editor/submitCode`, {
           language_id,
           source_code: value, // Uses current prop value (should be synced)
-          question_id: questionId
+          question_id: questionId,
+          isBattle:isBattle
         });
         responseData = response.data;
       }
       else {
+        if(isBattle) console.log("Battle run ");
+        
         const promises = testCases.map(testCase =>
           api.post(`/editor/submitCode`, {
             language_id,
             source_code: value,
             stdin: testCase.input,
-            expected_output: testCase.expected
+            expected_output: testCase.expected,
+            isBattle:isBattle
           }).then(res => ({
             ...res.data,
             testCaseId: testCase.id,

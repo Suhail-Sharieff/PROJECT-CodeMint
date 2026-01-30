@@ -1,7 +1,7 @@
 import { ApiError } from "../Utils/Api_Error.utils.js";
 import { asyncHandler } from "../Utils/AsyncHandler.utils.js";
 import axios from "axios";
-import { db } from "../Utils/sql_connection.js"; // Import DB
+import { db } from "../Utils/sql_connection.js"; 
 import { produceEvent } from "../Utils/kafka_connection.js";
 import { Events, Topics } from "../Utils/kafka_events.js";
 
@@ -31,13 +31,13 @@ const constants_body = {
 };
 
 const submitCode = asyncHandler(async (req, res) => {
-    const { language_id, source_code, stdin, expected_output, question_id } = req.body;
+    const { language_id, source_code, stdin, expected_output, question_id,isBattle=false } = req.body;
     const user_id = req.user.user_id;
 
     if (!language_id || !source_code) throw new ApiError(400, "language_id/source_code missing!");
 
     try {
-        // --- SCENARIO 1: Custom Run (Collaboration Session / Solo Editor) ---
+        //if ruuning in coding env, ie neither a ballte nor a test, then obvuiosly queston id doent exists for it, so no need to deal with score for it
         if (!question_id) {
             const response = await axios.post(`${JUDGE0}/submissions`,
                 { language_id, source_code, stdin, expected_output, ...constants_body },
@@ -46,13 +46,9 @@ const submitCode = asyncHandler(async (req, res) => {
             return res.status(200).json(response.data);
         }
 
-        // --- SCENARIO 2: Test OR Battle Submission ---
-        
-        // 1. Determine Context (Check if it's a Battle Question or a Test Question)
-        const [battleQ] = await db.execute('SELECT battle_id FROM battle_question WHERE battle_question_id = ?', [question_id]);
-        const isBattle = battleQ.length > 0;
+        //----------now its a submission made in battle or a test
 
-        // 2. Fetch Test Cases from correct table
+
         let dbCases;
         if (isBattle) {
             [dbCases] = await db.execute('SELECT * FROM battlecase WHERE battle_question_id = ?', [question_id]);
@@ -62,7 +58,7 @@ const submitCode = asyncHandler(async (req, res) => {
 
         if (dbCases.length === 0) return res.status(200).json({ message: "No test cases found for this question." });
 
-        // 3. Execute all cases via Judge0
+        // --main execution
         let passedCount = 0;
         const promises = dbCases.map(async (testCase) => {
             try {
@@ -100,11 +96,17 @@ const submitCode = asyncHandler(async (req, res) => {
         const results = await Promise.all(promises);
         const questionScore = Math.round((passedCount / dbCases.length) * 100);
 
-        // 4. Update Database based on Context
+        // console.log(results);
+        
+        // console.log(`IS BATTLE: ${isBattle}`);
+        
+
+        // update scores
         if (isBattle) {
+             const [battleQ] = await db.execute('SELECT battle_id FROM battle_question WHERE battle_question_id = ?', [question_id]);
             const battle_id = battleQ[0].battle_id;
+           
             
-            // Update Battle Submissions
             await db.execute(`
                 INSERT INTO battle_submissions (battle_id, battle_question_id, user_id, code, language, score)
                 VALUES (?, ?, ?, ?, ?, ?)
@@ -117,7 +119,7 @@ const submitCode = asyncHandler(async (req, res) => {
 
             const [sumRows] = await db.execute('SELECT SUM(score) as total_score FROM battle_submissions WHERE battle_id = ? AND user_id = ?', [battle_id, user_id]);
             const finalTotalScore = parseInt(sumRows[0].total_score) || 0;
-            console.log(`final total score=${finalTotalScore}`,sumRows);
+            // console.log(`final total battle score=${finalTotalScore}`,sumRows);
             await produceEvent(Topics.DB_TOPIC, {
                 type: Events.DB_QUERY.type,
                 payload: {
@@ -126,12 +128,9 @@ const submitCode = asyncHandler(async (req, res) => {
                     params: [finalTotalScore, battle_id, user_id]
                 }
             });
-            // Note: Battles often care about the specific question status (100% pass)
-            // rather than a cumulative total score across questions like Tests do.
             return res.status(200).json({ results, score: questionScore, type: 'battle' });
 
         } else {
-            // Standard Test Logic (Your existing logic)
             const [qRows] = await db.execute('SELECT test_id FROM question WHERE question_id=?', [question_id]);
             const test_id = qRows[0].test_id;
 
@@ -147,7 +146,7 @@ const submitCode = asyncHandler(async (req, res) => {
 
             const [sumRows] = await db.execute('SELECT SUM(score) as total_score FROM test_submissions WHERE test_id = ? AND user_id = ?', [test_id, user_id]);
             const finalTotalScore = parseInt(sumRows[0].total_score) || 0;
-
+            console.log(`final total test score=${finalTotalScore}`,sumRows);
             await produceEvent(Topics.DB_TOPIC, {
                 type: Events.DB_QUERY.type,
                 payload: {

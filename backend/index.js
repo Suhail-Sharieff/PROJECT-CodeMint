@@ -8,7 +8,7 @@ import { connectKafka } from "./Utils/kafka_connection.js";
 
 dotenv.config();
 
-// Validate required environment variables
+// we dont want to ov  further even if .env file misses somethng, so chk that first
 const validateEnv = () => {
   const required = [
     'PORT',
@@ -57,7 +57,7 @@ const startServer = async () => {
     const io = new Server(server, {
       cors: {
         origin: (origin, cb) => {
-             // Allow requests with no origin (like mobile apps or curl requests)
+             // to alllow requests with no origin (like mobile apps or curl requests)
             if (!origin) return cb(null, true);
             if (allowedOrigins.length === 0 || allowedOrigins.includes(origin)) return cb(null, true);
             cb(new Error('Not allowed by CORS'));
@@ -65,7 +65,7 @@ const startServer = async () => {
         methods: ["GET", "POST"],
         credentials: true
       },
-      // OPTIONAL BUT RECOMMENDED: Force websockets to reduce stickiness issues
+      // to force websockets to reduce stickiness issues, if stickiness cntinues, wit switches to long polling
       transports: ['websocket', 'polling'] 
     });
     const { registerSocketEvents } = await import("./socket_events.js");

@@ -1,7 +1,7 @@
 import { Kafka, Partitioners } from "kafkajs";
 import { db } from "./sql_connection.js"; 
 
-// 1. Setup a specific producer for the recovery worker
+// we need new prdcuer for handling studff in dlq
 const kafka = new Kafka({
     clientId: "codemint_dlq_worker",
     brokers: (process.env.KAFKA_ORIGIN || "localhost:9092").split(','),
@@ -9,10 +9,10 @@ const kafka = new Kafka({
 
 const producer = kafka.producer({
     createPartitioner: Partitioners.LegacyPartitioner,
-    idempotent: true,
+    idempotent: true,//so that same msg isnt processed by 2 o more workers by kakfka, btw kafka always ensures idempotency if we have partition id
 });
 
-const BATCH_SIZE = 50; // Process 50 failed messages at a time
+const BATCH_SIZE = 50; //v will prcess 50 procss batchwise to avoid over mem usage
 
 export const processDLQ = async () => {
     console.log("♻️ Starting DLQ Recovery Job...");
@@ -20,7 +20,6 @@ export const processDLQ = async () => {
     try {
         await producer.connect();
 
-        // 2. Fetch failed messages from MySQL
         const [rows] = await db.execute(
             `SELECT id, topic, payload FROM kafka_dlq ORDER BY created_at ASC LIMIT ?`, 
             [BATCH_SIZE]
@@ -34,21 +33,21 @@ export const processDLQ = async () => {
 
         console.log(`Found ${rows.length} messages in DLQ. Attempting retry...`);
 
-        // 3. Iterate and Retry
+        //now retry all
         for (const row of rows) {
             const { id, topic, payload } = row;
             let data;
 
             try {
-                // Handle potential double-stringified JSON
+                //sql stores as string, so need to reparse to JSON
                 data = typeof payload === 'string' ? JSON.parse(payload) : payload;
             } catch (e) {
                 console.error(`❌ Corrupt JSON in DLQ ID ${id}. Manual intervention needed.`);
-                continue; // Skip this one
+                continue; //LOL some invalid i stored non JSON ig====TODO
             }
 
             try {
-                // RETRY SENDING TO KAFKA
+                // retry my brother....
                 await producer.send({
                     topic,
                     messages: [{ value: JSON.stringify(data) }],
@@ -57,14 +56,14 @@ export const processDLQ = async () => {
 
                 console.log(`✅ Recovered! Message ID ${id} sent to ${topic}`);
 
-                // 4. ON SUCCESS: Delete from DLQ Table
+                // now thats done, we need to del from DB too
                 await db.execute('DELETE FROM kafka_dlq WHERE id = ?', [id]);
 
             } catch (kafkaErr) {
                 console.error(`⚠️ Retry failed for ID ${id}: ${kafkaErr.message}`);
                 await db.execute('UPDATE kafka_dlq SET retry_count = retry_count + 1 WHERE id = ?', [id]);
 
-                // Delete if retried too many times (Give up)
+                // retreied too many times, i give up
                 await db.execute('DELETE FROM kafka_dlq WHERE retry_count > 10 AND id = ?', [id])
             }
         }
