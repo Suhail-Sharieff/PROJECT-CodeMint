@@ -1,6 +1,6 @@
 # Codemint
 - Collaborative coding platform where you can conduct coding sessions with people you want to collaborate with, duel battle wit friends or conduct timed and proctored OA (online assessment)
-- NodeJS(backend), React(Frontend), Databse: MySQL, Messaging Queue: apache kafka, architecture: event_based architecture, JWT secure auth, Socket.io for real time updates, Redis-clustering for socket affinity, scaled using Node clustering, backpressure and retry logic support for cluster nodes, DLQ to handle failed events
+- NodeJS(backend), React(Frontend), Databse: MySQL, Messaging Queue: apache kafka, architecture: event_based architecture, JWT secure auth, Socket.io for real time updates, Redis-clustering for socket affinity, scaled using Node clustering, backpressure and retry logic support for cluster nodes, DLQ to handle failed events, Grafana,Prometheus for metrics
 - Upcoming changes im working upon: YOLOS(AI powered plagiarism detection during OAs), WebRTC integration to enable audo-video support too, Load balancing and auto scaling, rate limitter
 ## DB Schema
 ![1](./assets/db_schema.drawio.png)
