@@ -1,7 +1,7 @@
 import jwt from "jsonwebtoken";
 import { ApiError } from "../Utils/Api_Error.utils.js";
-
-export const verifyJWT = (req, res, next) => {
+import { redis} from "../Utils/redis_connection.utils.js";
+export const verifyJWT = async(req, res, next) => {
   try {
     // Get token from cookie or header
     const token =
@@ -23,6 +23,10 @@ export const verifyJWT = (req, res, next) => {
     };
 
     console.log(`✅ JWT verified 'user' can be now accesed using req.user `);
+
+    await redis.setEx(`${decoded.user_id}:${decoded.email}`,60,req.ip);
+    // console.log(JSON.stringify(req.user));
+
     next();
   } catch (err) {
     console.error("❌ JWT verification failed:", err.message);
