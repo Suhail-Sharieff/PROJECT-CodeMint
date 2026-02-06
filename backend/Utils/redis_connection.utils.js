@@ -24,9 +24,13 @@ const init_redis = async () => {
 };
 
 const close_redis = async () => {
-  if (redis) {
-    await redis.quit();
-    console.log("🚪 Redis connection closed");
+  try {
+    if (redis) {
+      await redis.quit();
+      console.log("🚪 Redis connection closed");
+    }
+  } catch (error) {
+    console.log("❌ Redis connection failed");
   }
 };
 
