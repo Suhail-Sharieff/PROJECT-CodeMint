@@ -1,0 +1,1 @@
+export default baseUrl=`http://localhost:8080/${process.env.PORT}`
