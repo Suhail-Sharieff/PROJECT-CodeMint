@@ -103,8 +103,8 @@ const createbattle = async (user_id, battle_id, duration = 10, title) => {
         if (!user_id) throw new ApiError(400, `No user_id provided by SocketManager to create battle!`)
         if (!battle_id) throw new ApiError(400, `No battle_id provided by SocketManager to create battle!`)
 
-        const query = 'insert into battle (battle_id,host_id,duration,title) values(?,?,?,?)'
-        const [rows] = await db.execute(query, [battle_id, user_id, duration, title])
+        const query = 'insert into battle (battle_id,host_id,duration,title,curr_round) values(?,?,?,?,?)'
+        const [rows] = await db.execute(query, [battle_id, user_id, duration, title,0])
         if (rows.length === 0) throw new ApiError(400, "Unabe to create battle!")
 
 
@@ -175,7 +175,7 @@ export const setupBattleEvents = async (io, socket) => {
             
             const { user_id, name } = socket.user;
 
-            const [battleRows] = await db.execute('SELECT host_id, status, start_time, duration FROM battle WHERE battle_id = ?', [battle_id]);
+            const [battleRows] = await db.execute('SELECT host_id, status, start_time, duration,curr_round FROM battle WHERE battle_id = ?', [battle_id]);
             if (battleRows.length === 0) return socket.emit('error', { message: "battle not found" });
 
             const battleMeta = battleRows[0];
@@ -251,6 +251,7 @@ export const setupBattleEvents = async (io, socket) => {
                 users,
                 timeLeft,
                 duration: battleMeta.duration,
+                curr_round:battleMeta.curr_round
             });
 
             if (role === 'joinee') {
@@ -351,7 +352,8 @@ export const setupBattleEvents = async (io, socket) => {
     });
 
 
-    socket.on('solved_question_first', ({ battle_id, user_id, battle_question_id }) => {
+    socket.on('solved_question_first', async({ battle_id, user_id, battle_question_id }) => {
         socket.to(battle_id).emit('move_to_next_question')
+        await db.execute('update battle set curr_round=curr_round+1');
     })
 }

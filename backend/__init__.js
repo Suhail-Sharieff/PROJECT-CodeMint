@@ -150,6 +150,7 @@ CREATE TABLE IF NOT EXISTS battle(
     created_at DATETIME DEFAULT NOW(),
     duration INT DEFAULT 60, -- Duration in minutes
     start_time DATETIME, 
+    curr_round int not null default 0,
     FOREIGN KEY(host_id) REFERENCES user(user_id) ON DELETE CASCADE
 );
 CREATE TABLE IF NOT EXISTS battle_question(
