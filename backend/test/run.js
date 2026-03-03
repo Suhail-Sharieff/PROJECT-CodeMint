@@ -1,25 +1,59 @@
-import http from 'k6/http';
 import { check, sleep } from 'k6';
-//k6 run --vus 10 --duration 30s script.js
+import http from 'k6/http';
+import { io } from 'k6/experimental/socketio';
+
 export const options = {
-  vus: 1,
-  iterations: 1000,
+  vus: 5,
+  duration: '10s',
 };
 
-const params = {
-  headers: {
-    'Content-Type': 'application/json'
-  }
-};
 export default function () {
-  const i = __ITER;   // built-in iteration counter
 
-  const payload = JSON.stringify({
-    email: `user${i}@gmail.com`,
-    password: `user${i}@123`,
-    name: `user${i}`,
-    phone: `${Math.floor(Math.random()*10000)}`
+  // 1️⃣ LOGIN FIRST
+  const loginRes = http.post(
+    'http://localhost:8080/auth/login',
+    JSON.stringify({
+      email: 'user1@gmail.com',
+      password: 'user1@123',
+    }),
+    {
+      headers: { 'Content-Type': 'application/json' },
+    }
+  );
+
+  check(loginRes, {
+    'login success': (r) => r.status === 200,
   });
 
-  http.post('http://localhost:8080/auth/register', payload, params);
+  const body = JSON.parse(loginRes.body);
+  const accessToken = body.data.accessToken;
+
+  // 2️⃣ CONNECT TO SOCKET.IO
+  const socket = io('ws://localhost:8080', {
+    auth: {
+      token: accessToken,
+    },
+    transports: ['websocket'],
+  });
+
+  socket.on('connect', () => {
+    console.log('Connected to socket');
+
+    // Example emit
+    socket.emit('create_battle', {
+      mode: 'test',
+    });
+  });
+
+  socket.on('connect_error', (err) => {
+    console.log('Connection failed:', err);
+  });
+
+  socket.on('battle_created', (data) => {
+    console.log('Battle created:', JSON.stringify(data));
+  });
+
+  sleep(5);
+
+  socket.close();
 }

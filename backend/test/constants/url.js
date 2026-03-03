@@ -1,1 +1,2 @@
-export default baseUrl=`http://localhost:8080/${process.env.PORT}`
+const baseUrl=`http://localhost:8080`
+export default baseUrl

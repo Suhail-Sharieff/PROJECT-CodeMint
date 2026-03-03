@@ -17,7 +17,7 @@ const constLoadOptions={
 const suddenSpikeOptions={
     stages:[
         {duration:'10s',target:0},
-        {duration:'2m',target:1000*n},
+        {duration:'2m',target:400*n},
         {duration:'20s',target:0},
     ],
     setupTimeout:'4m'
@@ -30,7 +30,6 @@ const gradualLoadOptions={
         {duration:'1m',target:100*n},
         {duration:'1m',target:200*n},
         {duration:'1m',target:400*n},
-        {duration:'1m',target:800*n},
         {duration:'1m',target:0},
     ],
     setupTimeout:'5m',
