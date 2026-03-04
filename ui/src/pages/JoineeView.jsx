@@ -7,6 +7,7 @@ import {
     Share2, MessageSquare, X, Wifi, WifiOff,
     Info, Terminal, Monitor, LogOut, Code
 } from 'lucide-react';
+import { VoiceChatControls } from '../components/VoiceChatControls';
 
 const JoinView = () => {
     const { session_id } = useParams();
@@ -26,13 +27,13 @@ const JoinView = () => {
     const [showSocketInfo, setShowSocketInfo] = useState(false);
     const [error, setError] = useState(null); // Added Error State
     const handleError = (err) => {
-            console.error("Socket Error:", err);
-            setError(err.message || "Unknown error");
-            if (err.message && err.message.includes("ended")) {
-                alert(err.message);
-                navigate('/');
-            }
-        };
+        console.error("Socket Error:", err);
+        setError(err.message || "Unknown error");
+        if (err.message && err.message.includes("ended")) {
+            alert(err.message);
+            navigate('/');
+        }
+    };
     // --- Socket Logic ---
     useEffect(() => {
         if (!socket) return;
@@ -140,13 +141,16 @@ const JoinView = () => {
                     </div>
                 </div>
 
-                <button
-                    onClick={handleLeaveSession}
-                    className="flex items-center gap-2 px-4 py-2 bg-gray-800 hover:bg-red-900/30 hover:text-red-400 hover:border-red-800 border border-gray-700 text-gray-300 rounded-lg transition-all text-sm"
-                >
-                    <LogOut size={16} />
-                    <span>Leave</span>
-                </button>
+                <div className="flex items-center gap-3">
+                    <VoiceChatControls roomId={session_id} roomType="session" />
+                    <button
+                        onClick={handleLeaveSession}
+                        className="flex items-center gap-2 px-4 py-2 bg-gray-800 hover:bg-red-900/30 hover:text-red-400 hover:border-red-800 border border-gray-700 text-gray-300 rounded-lg transition-all text-sm"
+                    >
+                        <LogOut size={16} />
+                        <span>Leave</span>
+                    </button>
+                </div>
             </header>
 
             {showSocketInfo && (
@@ -255,8 +259,8 @@ const TabButton = ({ active, onClick, icon, label, color }) => (
     <button
         onClick={onClick}
         className={`relative flex items-center gap-2 px-4 py-3 text-sm font-medium transition-all border-b-2 ${active
-                ? `border-${color}-500 text-white bg-[#161B22]`
-                : 'border-transparent text-gray-500 hover:text-gray-300 hover:bg-gray-800/50'
+            ? `border-${color}-500 text-white bg-[#161B22]`
+            : 'border-transparent text-gray-500 hover:text-gray-300 hover:bg-gray-800/50'
             } rounded-t-lg`}
     >
         {icon}

@@ -188,7 +188,7 @@ const HostBattleView = () => {
         </div>
 
         <div className="flex gap-3">
-          <VoiceChatControls battle_id={battle_id} />
+          <VoiceChatControls roomId={battle_id} />
           <div className="bg-gray-800 p-1 rounded-lg flex">
             <button onClick={() => setViewMode("manage")} className={`px-4 py-1.5 rounded-md text-sm ${viewMode === "manage" ? "bg-blue-600 text-white" : "text-gray-400"}`}>Arena Setup</button>
             <button onClick={() => setViewMode("monitor")} className={`px-4 py-1.5 rounded-md text-sm ${viewMode === "monitor" ? "bg-blue-600 text-white" : "text-gray-400"}`}>War Room</button>

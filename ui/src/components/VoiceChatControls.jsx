@@ -22,7 +22,7 @@ const AudioTag = ({ stream, isDeafened }) => {
     );
 };
 
-export const VoiceChatControls = ({ battle_id }) => {
+export const VoiceChatControls = ({ roomId, roomType = 'battle' }) => {
     const { socket, isConnected } = useSocket();
     const { user } = useAuth();
 
@@ -36,7 +36,7 @@ export const VoiceChatControls = ({ battle_id }) => {
         leaveVoice,
         toggleMute,
         toggleDeafen
-    } = useWebRTCGroupVoice(socket, battle_id, user?.user_id);
+    } = useWebRTCGroupVoice(socket, roomId, user?.user_id, roomType);
 
     if (!isConnected) return null;
 
@@ -85,7 +85,7 @@ export const VoiceChatControls = ({ battle_id }) => {
                             className={`p-2 rounded hover:bg-gray-700 transition-colors ${isDeafened ? 'text-red-400' : 'text-gray-200'}`}
                             title={isDeafened ? "Undeafen" : "Deafen"}
                         >
-                            {isDeafened ? <HeadphonesOff size={18} /> : <Headphones size={18} />}
+                            {isDeafened ? <HeadphoneOff size={18} /> : <Headphones size={18} />}
                         </button>
                     </div>
 

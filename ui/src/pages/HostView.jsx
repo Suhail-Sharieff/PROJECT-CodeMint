@@ -5,9 +5,10 @@ import { useAuth } from '../context/AuthContext';
 import CodeEditor from './CodeEditor'; // Ensure this path is correct
 import {
     Share2, Users, MessageSquare,
-    X, Wifi, WifiOff, Info, Terminal, Eye, LogOut, 
-    UserX // --- ADDED --- Icon for kicking user
+    X, Wifi, WifiOff, Info, Terminal, Eye, LogOut,
+    UserX, MicOff
 } from 'lucide-react';
+import { VoiceChatControls } from '../components/VoiceChatControls';
 
 const HostView = () => {
     const { session_id } = useParams();
@@ -30,7 +31,7 @@ const HostView = () => {
     // --- Socket Event Listeners ---
     useEffect(() => {
         if (!socket) return;
-        
+
         socket.emit('join_session', { session_id });
 
         const handleSessionState = (state) => {
@@ -124,7 +125,7 @@ const HostView = () => {
 
     return (
         <div className="h-screen bg-[#0D1117] text-gray-300 flex flex-col overflow-hidden font-sans">
-            
+
             {/* --- Header --- */}
             <header className="bg-[#161B22] border-b border-gray-800 p-4 z-10 flex items-center justify-between">
                 <div className="flex items-center gap-4">
@@ -145,6 +146,7 @@ const HostView = () => {
                     </div>
                 </div>
                 <div className="flex items-center gap-3">
+                    <VoiceChatControls roomId={session_id} roomType="session" />
                     <button onClick={() => setShowEndModal(true)} className="flex items-center gap-2 px-4 py-2 bg-red-600/10 border border-red-600/50 text-red-400 hover:bg-red-600 hover:text-white font-semibold rounded-lg transition-all">
                         <LogOut size={16} />
                         <span>End Session</span>
@@ -178,7 +180,7 @@ const HostView = () => {
                 <div className="flex-1 p-4 overflow-hidden bg-[#0D1117]">
                     {activeTab === 'code' && (
                         <div className="h-full animate-in fade-in duration-300">
-                            <CodeEditor 
+                            <CodeEditor
                                 value={code}
                                 language={language}
                                 onChange={handleCodeChange}
@@ -186,7 +188,7 @@ const HostView = () => {
                             />
                         </div>
                     )}
-                    
+
                     {/* --- UPDATED --- Monitor Tab now has Kick Button */}
                     {activeTab === 'monitor' && (
                         <div className="h-full flex gap-4 animate-in fade-in duration-300">
@@ -198,33 +200,40 @@ const HostView = () => {
                                     {users.filter(p => p.role !== 'host').length === 0 && (
                                         <p className="text-xs text-gray-500 text-center mt-10">Waiting for joinees to join...</p>
                                     )}
-                                    
+
                                     {users.filter(p => p.role !== 'host').map(p => (
-                                        <div 
-                                            key={p.id} 
-                                            className={`w-full flex items-center justify-between group rounded-lg transition-colors ${
-                                                selectedJoineeId === p.id ? 'bg-blue-500/20' : 'hover:bg-gray-800'
-                                            }`}
+                                        <div
+                                            key={p.id}
+                                            className={`w-full flex items-center justify-between group rounded-lg transition-colors ${selectedJoineeId === p.id ? 'bg-blue-500/20' : 'hover:bg-gray-800'
+                                                }`}
                                         >
                                             {/* Clickable Area to View Code */}
                                             <button
                                                 onClick={() => setSelectedJoineeId(p.id)}
-                                                className={`flex-1 flex items-center justify-between text-left px-3 py-2 rounded-l-lg truncate ${
-                                                    selectedJoineeId === p.id ? 'text-blue-300' : 'text-gray-400 group-hover:text-gray-200'
-                                                }`}
+                                                className={`flex-1 flex items-center justify-between text-left px-3 py-2 rounded-l-lg truncate ${selectedJoineeId === p.id ? 'text-blue-300' : 'text-gray-400 group-hover:text-gray-200'
+                                                    }`}
                                             >
-                                                <span className="truncate">{p.name || `User ${p.id.substr(0,4)}`}</span>
+                                                <span className="truncate">{p.name || `User ${p.id.substr(0, 4)}`}</span>
                                                 {joineeCodes.has(p.id) && <div className="w-2 h-2 rounded-full bg-emerald-500 ml-2 flex-shrink-0"></div>}
                                             </button>
-                                            
-                                            {/* Kick Button */}
-                                            <button
-                                                onClick={() => handleKickUser(p)}
-                                                title={`Remove ${p.name || 'user'}`}
-                                                className="p-2 text-gray-500 hover:text-red-500 hover:bg-red-500/10 opacity-50 group-hover:opacity-100 rounded-r-lg transition-all"
-                                            >
-                                                <UserX size={14} />
-                                            </button>
+
+                                            {/* Actions */}
+                                            <div className="flex bg-[#161B22]/50 rounded-r-lg overflow-hidden">
+                                                <button
+                                                    onClick={(e) => { e.stopPropagation(); socket.emit('session_force_mute', { session_id, userIdToMute: p.id }); }}
+                                                    title={`Mute ${p.name || 'user'}`}
+                                                    className="p-2 text-gray-500 hover:text-yellow-500 hover:bg-yellow-500/10 opacity-50 group-hover:opacity-100 transition-all"
+                                                >
+                                                    <MicOff size={14} />
+                                                </button>
+                                                <button
+                                                    onClick={() => handleKickUser(p)}
+                                                    title={`Remove ${p.name || 'user'}`}
+                                                    className="p-2 text-gray-500 hover:text-red-500 hover:bg-red-500/10 opacity-50 group-hover:opacity-100 transition-all"
+                                                >
+                                                    <UserX size={14} />
+                                                </button>
+                                            </div>
                                         </div>
                                     ))}
                                 </div>
@@ -272,8 +281,8 @@ const HostView = () => {
                     <div className="bg-[#161B22] p-6 rounded-xl w-96 border border-gray-700 shadow-2xl transform transition-all scale-100">
                         <h2 className="text-xl text-white font-semibold mb-2">End Session?</h2>
                         <p className="text-gray-400 mb-6 text-sm leading-relaxed">
-                            This will disconnect all participants and close the room. 
-                            <br/>Code data will be saved in the database.
+                            This will disconnect all participants and close the room.
+                            <br />Code data will be saved in the database.
                         </p>
                         <div className="flex justify-end gap-3">
                             <button onClick={() => setShowEndModal(false)} className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-gray-200 rounded-lg text-sm font-medium transition-colors">
@@ -312,7 +321,7 @@ const ChatPanel = ({ messages, onSend, currentUser }) => {
     const scrollRef = useRef(null);
 
     useEffect(() => {
-        if(scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+        if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }, [messages]);
 
     const handleSubmit = (e) => {
@@ -341,7 +350,7 @@ const ChatPanel = ({ messages, onSend, currentUser }) => {
                                 {m.message}
                             </div>
                             <span className="text-[10px] text-gray-600 mt-1 px-1">
-                                {m.timestamp ? new Date(m.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : ''}
+                                {m.timestamp ? new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
                             </span>
                         </div>
                     );

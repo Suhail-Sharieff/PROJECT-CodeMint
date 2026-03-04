@@ -284,10 +284,10 @@ const JoineeBattleView = () => {
               <div
                 key={idx}
                 className={`h-2 w-8 rounded-full ${idx === activeQIndex
-                    ? "bg-blue-500 shadow-lg shadow-blue-500/50"
-                    : idx < activeQIndex
-                      ? "bg-green-500"
-                      : "bg-gray-700"
+                  ? "bg-blue-500 shadow-lg shadow-blue-500/50"
+                  : idx < activeQIndex
+                    ? "bg-green-500"
+                    : "bg-gray-700"
                   }`}
               />
             ))}
@@ -302,7 +302,7 @@ const JoineeBattleView = () => {
         </div>
 
         <div className="flex items-center gap-2">
-          <VoiceChatControls battle_id={battle_id} />
+          <VoiceChatControls roomId={battle_id} />
           <span className="text-xs text-gray-500">
             Opponents: {participants.length - 1}
           </span>
@@ -350,8 +350,8 @@ const JoineeBattleView = () => {
                 <div
                   key={p.id}
                   className={`flex justify-between items-center text-xs p-1.5 rounded ${socket.user?.user_id === p.id
-                      ? "bg-blue-900/30 border border-blue-800"
-                      : "text-gray-400"
+                    ? "bg-blue-900/30 border border-blue-800"
+                    : "text-gray-400"
                     }`}
                 >
                   <div className="flex items-center gap-2">

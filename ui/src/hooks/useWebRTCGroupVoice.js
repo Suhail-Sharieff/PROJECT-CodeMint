@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Device } from 'mediasoup-client';
 
-export const useWebRTCGroupVoice = (socket, battle_id, userId) => {
+export const useWebRTCGroupVoice = (socket, roomId, userId, roomType = 'battle') => {
     const [inVoice, setInVoice] = useState(false);
     const [isMuted, setIsMuted] = useState(false);
     const [isDeafened, setIsDeafened] = useState(false);
@@ -17,9 +17,19 @@ export const useWebRTCGroupVoice = (socket, battle_id, userId) => {
     const localStreamRef = useRef(null);
     const remoteStreamsRef = useRef({}); // socketId => MediaStream
 
+    const getEventName = useCallback((base) => {
+        return roomType === 'session' ? `session_${base}` : base;
+    }, [roomType]);
+
+    const getPayload = useCallback((extra = {}) => {
+        return roomType === 'session'
+            ? { session_id: roomId, ...extra }
+            : { battle_id: roomId, ...extra };
+    }, [roomType, roomId]);
+
     const request = useCallback((type, data = {}) => {
         return new Promise((resolve, reject) => {
-            socket.emit(type, data, (response) => {
+            socket.emit(getEventName(type), getPayload(data), (response) => {
                 if (response.error) {
                     reject(new Error(response.error));
                 } else {
@@ -27,7 +37,7 @@ export const useWebRTCGroupVoice = (socket, battle_id, userId) => {
                 }
             });
         });
-    }, [socket]);
+    }, [socket, getEventName, getPayload]);
 
     const cleanup = useCallback(() => {
         if (localStreamRef.current) {
@@ -47,20 +57,19 @@ export const useWebRTCGroupVoice = (socket, battle_id, userId) => {
         setInVoice(false);
 
         if (socket) {
-            socket.emit('leave_voice', { battle_id });
+            socket.emit(getEventName('leave_voice'), getPayload());
         }
-    }, [socket, battle_id]);
+    }, [socket, getEventName, getPayload]);
 
     useEffect(() => {
         return () => cleanup();
     }, [cleanup]);
 
-    const consumeProducer = async (producerId, socketId) => {
+    const consumeProducer = async (producerId, socketId, name) => {
         try {
             if (!deviceRef.current) return;
 
             const { params } = await request('transport-consume', {
-                battle_id,
                 transportId: recvTransportRef.current.id,
                 producerId,
                 rtpCapabilities: deviceRef.current.rtpCapabilities
@@ -79,7 +88,7 @@ export const useWebRTCGroupVoice = (socket, battle_id, userId) => {
             stream.addTrack(consumer.track);
             remoteStreamsRef.current[socketId] = stream;
 
-            await request('resume-consumer', { battle_id, consumerId: consumer.id });
+            await request('resume-consumer', { consumerId: consumer.id });
 
             setActivePeers(prev => {
                 if (!prev.includes(socketId)) return [...prev, socketId];
@@ -95,9 +104,9 @@ export const useWebRTCGroupVoice = (socket, battle_id, userId) => {
     useEffect(() => {
         if (!socket || !inVoice) return;
 
-        const handleNewProducer = async ({ producerId, socketId }) => {
-            console.log(`[WebRTC] New producer found from ${socketId}`);
-            await consumeProducer(producerId, socketId);
+        const handleNewProducer = async ({ producerId, socketId, name }) => {
+            console.log(`[WebRTC] New producer found from ${socketId} - ${name}`);
+            await consumeProducer(producerId, socketId, name);
         };
 
         const handleUserLeft = ({ socketId }) => {
@@ -136,33 +145,30 @@ export const useWebRTCGroupVoice = (socket, battle_id, userId) => {
 
         const handleMutedByHost = () => {
             console.log('[WebRTC] Muted by host!');
-            if (producerRef.current && !isMuted) { // Only pause if not already paused
+            if (producerRef.current && !isMuted) {
                 producerRef.current.pause();
                 setIsMuted(true);
             }
         };
 
-        socket.on('newProducer', handleNewProducer);
-        socket.on('user_left_voice', handleUserLeft);
-        socket.on('producerClosed', handleProducerClosed);
-        socket.on('you_were_muted_by_host', handleMutedByHost);
+        socket.on(getEventName('newProducer'), handleNewProducer);
+        socket.on(getEventName('user_left_voice'), handleUserLeft);
+        socket.on(getEventName('producerClosed'), handleProducerClosed);
+        socket.on(getEventName('you_were_muted_by_host'), handleMutedByHost);
 
         return () => {
-            socket.off('newProducer', handleNewProducer);
-            socket.off('user_left_voice', handleUserLeft);
-            socket.off('producerClosed', handleProducerClosed);
-            socket.off('you_were_muted_by_host', handleMutedByHost);
+            socket.off(getEventName('newProducer'), handleNewProducer);
+            socket.off(getEventName('user_left_voice'), handleUserLeft);
+            socket.off(getEventName('producerClosed'), handleProducerClosed);
+            socket.off(getEventName('you_were_muted_by_host'), handleMutedByHost);
         };
-    }, [socket, inVoice, isMuted]);
+    }, [socket, inVoice, isMuted, getEventName]);
 
     const joinVoice = async () => {
         if (inVoice) return;
         try {
-            const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-            localStreamRef.current = stream;
-
-            // 1. Get Router RTP Capabilities
-            const { rtpCapabilities } = await request('getRouterRtpCapabilities', { battle_id });
+            // 1. Get Router capabilities
+            const { rtpCapabilities } = await request('getRouterRtpCapabilities');
 
             // 2. Load Device
             const device = new Device();
@@ -170,52 +176,72 @@ export const useWebRTCGroupVoice = (socket, battle_id, userId) => {
             deviceRef.current = device;
 
             // 3. Create Send Transport
-            const sendTransportData = await request('createWebRtcTransport', { battle_id });
-            sendTransportRef.current = device.createSendTransport(sendTransportData.params);
+            const { params: sendTransportParams } = await request('createWebRtcTransport');
+            const sendTransport = device.createSendTransport(sendTransportParams);
 
-            sendTransportRef.current.on('connect', ({ dtlsParameters }, callback, errback) => {
-                request('transport-connect', { battle_id, transportId: sendTransportRef.current.id, dtlsParameters })
-                    .then(callback).catch(errback);
-            });
-
-            sendTransportRef.current.on('produce', async (parameters, callback, errback) => {
+            sendTransport.on('connect', async ({ dtlsParameters }, callback, errback) => {
                 try {
-                    const { id } = await request('transport-produce', {
-                        battle_id,
-                        transportId: sendTransportRef.current.id,
-                        kind: parameters.kind,
-                        rtpParameters: parameters.rtpParameters
+                    await request('transport-connect', {
+                        transportId: sendTransport.id,
+                        dtlsParameters
                     });
-                    callback({ id });
-                } catch (err) {
-                    errback(err);
+                    callback();
+                } catch (error) {
+                    errback(error);
                 }
             });
 
-            // 4. Create Receive Transport
-            const recvTransportData = await request('createWebRtcTransport', { battle_id });
-            recvTransportRef.current = device.createRecvTransport(recvTransportData.params);
-
-            recvTransportRef.current.on('connect', ({ dtlsParameters }, callback, errback) => {
-                request('transport-connect', { battle_id, transportId: recvTransportRef.current.id, dtlsParameters })
-                    .then(callback).catch(errback);
+            sendTransport.on('produce', async ({ kind, rtpParameters }, callback, errback) => {
+                try {
+                    const { id } = await request('transport-produce', {
+                        transportId: sendTransport.id,
+                        kind,
+                        rtpParameters
+                    });
+                    callback({ id });
+                } catch (error) {
+                    errback(error);
+                }
             });
 
-            // 5. Produce Local Audio
+            sendTransportRef.current = sendTransport;
+
+            // 4. Create Receive Transport
+            const { params: recvTransportParams } = await request('createWebRtcTransport');
+            const recvTransport = device.createRecvTransport(recvTransportParams);
+
+            recvTransport.on('connect', async ({ dtlsParameters }, callback, errback) => {
+                try {
+                    await request('transport-connect', {
+                        transportId: recvTransport.id,
+                        dtlsParameters
+                    });
+                    callback();
+                } catch (error) {
+                    errback(error);
+                }
+            });
+
+            recvTransportRef.current = recvTransport;
+
+            // 5. Get and produce local audio
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            localStreamRef.current = stream;
             const audioTrack = stream.getAudioTracks()[0];
-            producerRef.current = await sendTransportRef.current.produce({ track: audioTrack });
+
+            producerRef.current = await sendTransport.produce({ track: audioTrack });
 
             // 6. Consume existing producers
-            const { producers } = await request('getProducers', { battle_id });
-            for (const { producerId, socketId } of producers) {
-                await consumeProducer(producerId, socketId);
+            const { producers } = await request('getProducers');
+            for (const { producerId, socketId, name } of producers) {
+                await consumeProducer(producerId, socketId, name);
             }
 
             setInVoice(true);
             setIsMuted(false);
 
-        } catch (err) {
-            console.error('[WebRTC] Failed to join voice:', err);
+        } catch (error) {
+            console.error('[WebRTC] Failed to join voice:', error);
             alert('Could not connect to voice server. Make sure microphone is allowed.');
             cleanup();
         }
@@ -227,19 +253,12 @@ export const useWebRTCGroupVoice = (socket, battle_id, userId) => {
 
     const toggleMute = () => {
         if (producerRef.current) {
-            if (!isMuted) {
-                producerRef.current.pause();
-            } else {
+            if (isMuted) {
                 producerRef.current.resume();
+            } else {
+                producerRef.current.pause();
             }
             setIsMuted(!isMuted);
-        } else if (localStreamRef.current) {
-            // Fallback if producer isn't ready
-            const audioTrack = localStreamRef.current.getAudioTracks()[0];
-            if (audioTrack) {
-                audioTrack.enabled = !audioTrack.enabled;
-                setIsMuted(!audioTrack.enabled);
-            }
         }
     };
 
