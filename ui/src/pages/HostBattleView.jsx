@@ -179,7 +179,7 @@ const HostBattleView = () => {
       <div className="bg-[#161B22] p-4 rounded-xl border border-gray-800 flex justify-between items-center">
         <div>
           <h1 className="text-2xl font-bold text-white flex items-center gap-3">
-            <Swords className="text-red-500" /> Battle Commander <span className="text-gray-600 text-lg font-mono">#{battle_id.slice(0, 6)}</span>
+            <Swords className="text-red-500" /> Battle Commander <span className="text-gray-600 text-lg font-mono">#{battle_id}</span>
           </h1>
           <div className="flex items-center gap-3 mt-1 text-xs">
             <span className={`px-2 py-0.5 rounded ${battleState.status === "LIVE" ? "bg-red-500/20 text-red-400 animate-pulse" : "bg-blue-500/20 text-blue-400"}`}>{battleState.status}</span>

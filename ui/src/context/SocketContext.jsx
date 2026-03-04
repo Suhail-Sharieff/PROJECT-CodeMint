@@ -16,10 +16,10 @@ export const SocketProvider = ({ children }) => {
   useEffect(() => {
     // v will connect if user is logged in and we have an access token
     if (!user || !accessToken) {
-      console.log('🔌 Socket: Waiting for user or token...', { 
-        user: !!user, 
+      console.log('🔌 Socket: Waiting for user or token...', {
+        user: !!user,
         token: !!accessToken,
-        userId: user?.user_id 
+        userId: user?.user_id
       });
       if (socketRef.current) {
         console.log('🔌 Disconnecting socket (no user or token)...');
@@ -47,18 +47,18 @@ export const SocketProvider = ({ children }) => {
       socketRef.current = null;
     }
 
-    console.log('🔌 Connecting to socket server...', { 
-      url: SOCKET_URL, 
+    console.log('🔌 Connecting to socket server...', {
+      url: SOCKET_URL,
       hasToken: !!accessToken,
       tokenLength: accessToken?.length,
       tokenPreview: accessToken ? `${accessToken.substring(0, 20)}...` : 'No token'
     });
-    
+
     if (!accessToken) {
       console.error('❌ Cannot connect: No access token available');
       return;
     }
-    
+
     const newSocket = io(SOCKET_URL, {
       auth: {
         token: accessToken

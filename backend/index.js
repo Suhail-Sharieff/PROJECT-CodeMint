@@ -25,7 +25,7 @@ const validateEnv = () => {
   ];
 
   const missing = required.filter(key => !process.env[key]);
-  
+
   if (missing.length > 0) {
     console.error('❌ Missing required environment variables:');
     missing.forEach(key => console.error(`   - ${key}`));
@@ -52,23 +52,23 @@ const startServer = async () => {
     validateEnv();
     await connect_To_DB();
     await initDB(init_query);
-    await connectKafka();
+    // await connectKafka();
     await init_redis();
     const server = createServer(app);
     const allowedOrigins = (process.env.CORS_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean);
     const io = new Server(server, {
       cors: {
         origin: (origin, cb) => {
-             // to alllow requests with no origin (like mobile apps or curl requests)
-            if (!origin) return cb(null, true);
-            if (allowedOrigins.length === 0 || allowedOrigins.includes(origin)) return cb(null, true);
-            cb(new Error('Not allowed by CORS'));
+          // to alllow requests with no origin (like mobile apps or curl requests)
+          if (!origin) return cb(null, true);
+          if (allowedOrigins.length === 0 || allowedOrigins.includes(origin)) return cb(null, true);
+          cb(new Error('Not allowed by CORS'));
         },
         methods: ["GET", "POST"],
         credentials: true
       },
       // to force websockets to reduce stickiness issues, if stickiness cntinues, wit switches to long polling
-      transports: ['websocket', 'polling'] 
+      transports: ['websocket', 'polling']
     });
     const { registerSocketEvents } = await import("./socket_events.js");
     registerSocketEvents(io);
