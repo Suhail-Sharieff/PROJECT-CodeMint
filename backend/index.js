@@ -52,8 +52,10 @@ const startServer = async () => {
     validateEnv();
     await connect_To_DB();
     await initDB(init_query);
-    // await connectKafka();
+    await connectKafka();
     await init_redis();
+    const { createWorker } = await import("./Utils/mediasoup.js");
+    await createWorker();
     const server = createServer(app);
     const allowedOrigins = (process.env.CORS_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean);
     const io = new Server(server, {

@@ -270,7 +270,13 @@ const HostBattleView = () => {
               <tbody className="divide-y divide-gray-800">
                 {participants.map((p) => (
                   <tr key={p.id} onClick={() => setSelectedStudentId(p.id)} className={`cursor-pointer ${selectedStudentId === p.id ? "bg-blue-900/20" : "hover:bg-gray-800"}`}>
-                    <td className="px-4 py-3 text-gray-200">{p.name}<button onClick={(e) => { e.stopPropagation(); handleKick(p.id); }} className="block text-red-400 text-[10px] hover:underline">Kick</button></td>
+                    <td className="px-4 py-3 text-gray-200">
+                      {p.name}
+                      <div className="flex gap-2 mt-1">
+                        <button onClick={(e) => { e.stopPropagation(); socket.emit('force_mute', { battle_id, userIdToMute: p.id }); }} className="block text-yellow-500 text-[10px] hover:underline">Mute Audio</button>
+                        <button onClick={(e) => { e.stopPropagation(); handleKick(p.id); }} className="block text-red-400 text-[10px] hover:underline">Kick</button>
+                      </div>
+                    </td>
                     <td className="px-4 py-3 text-right font-bold text-yellow-400">{p.score}</td>
                   </tr>
                 ))}

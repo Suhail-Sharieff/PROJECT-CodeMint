@@ -4,6 +4,26 @@ import { Server, Socket } from "socket.io"
 import { ApiError } from "../Utils/Api_Error.utils.js";
 import { asyncHandler } from "../Utils/AsyncHandler.utils.js";
 import { ApiResponse } from "../Utils/Api_Response.utils.js";
+import { getWorker, mediasoupConfig } from "../Utils/mediasoup.js";
+
+const roomState = new Map();
+
+const getOrCreateRoom = async (battle_id) => {
+    let room = roomState.get(battle_id);
+    if (!room) {
+        const worker = getWorker();
+        const router = await worker.createRouter({ mediaCodecs: mediasoupConfig.routerOptions.mediaCodecs });
+        room = {
+            router,
+            transports: new Map(), // transport_id => transport
+            producers: new Map(), // producer_id => { producer, socketId }
+            consumers: new Map(), // consumer_id => { consumer, socketId }
+            socketToTransports: new Map() // socketId => Set of transport IDs
+        };
+        roomState.set(battle_id, room);
+    }
+    return room;
+};
 
 
 export const getBattlesByMe = asyncHandler(
@@ -356,53 +376,221 @@ export const setupBattleEvents = async (io, socket) => {
         socket.to(battle_id).emit('move_to_next_question')
     });
 
-    // --- WebRTC Voice Call Signaling ---
+    // --- Mediasoup SFU Voice Call Signaling ---
 
-    socket.on('join_voice', ({ battle_id }) => {
-        // Broadcast to all other users in the battle room that this user joined voice
-        socket.to(battle_id).emit('user_joined_voice', { socketId: socket.id, userId: socket.user.user_id, name: socket.user.name });
+    const cleanupSocketVoice = (socketId, battleId) => {
+        const room = roomState.get(battleId);
+        if (!room) return;
+
+        const transportIds = room.socketToTransports.get(socketId);
+        if (transportIds) {
+            for (const transportId of transportIds) {
+                const transport = room.transports.get(transportId);
+                if (transport) transport.close();
+                room.transports.delete(transportId);
+            }
+            room.socketToTransports.delete(socketId);
+        }
+
+        for (const [producerId, pData] of room.producers.entries()) {
+            if (pData.socketId === socketId) {
+                pData.producer.close();
+                room.producers.delete(producerId);
+            }
+        }
+
+        for (const [consumerId, cData] of room.consumers.entries()) {
+            if (cData.socketId === socketId) {
+                cData.consumer.close();
+                room.consumers.delete(consumerId);
+            }
+        }
+
+        socket.to(battleId).emit('user_left_voice', { socketId });
+    };
+
+    socket.on('getRouterRtpCapabilities', async ({ battle_id }, callback) => {
+        try {
+            const room = await getOrCreateRoom(battle_id);
+            if (callback) callback({ rtpCapabilities: room.router.rtpCapabilities });
+        } catch (err) {
+            console.error(err);
+            if (callback) callback({ error: err.message });
+        }
     });
 
-    socket.on('webrtc_offer', ({ targetSocketId, callerId, offer }) => {
-        // Relay offer to target
-        io.to(targetSocketId).emit('webrtc_offer', {
-            callerSocketId: socket.id,
-            callerId: callerId,
-            offer: offer
-        });
-    });
+    socket.on('createWebRtcTransport', async ({ battle_id }, callback) => {
+        try {
+            const room = await getOrCreateRoom(battle_id);
+            const transport = await room.router.createWebRtcTransport(mediasoupConfig.webRtcTransportOptions);
 
-    socket.on('webrtc_answer', ({ targetSocketId, answer }) => {
-        // Relay answer to caller
-        io.to(targetSocketId).emit('webrtc_answer', {
-            answererSocketId: socket.id,
-            answer: answer
-        });
-    });
+            room.transports.set(transport.id, transport);
+            if (!room.socketToTransports.has(socket.id)) {
+                room.socketToTransports.set(socket.id, new Set());
+            }
+            room.socketToTransports.get(socket.id).add(transport.id);
 
-    socket.on('webrtc_ice_candidate', ({ targetSocketId, candidate }) => {
-        if (candidate) {
-            io.to(targetSocketId).emit('webrtc_ice_candidate', {
-                senderSocketId: socket.id,
-                candidate: candidate
+            if (callback) callback({
+                params: {
+                    id: transport.id,
+                    iceParameters: transport.iceParameters,
+                    iceCandidates: transport.iceCandidates,
+                    dtlsParameters: transport.dtlsParameters
+                }
             });
+        } catch (err) {
+            console.error(err);
+            if (callback) callback({ error: err.message });
+        }
+    });
+
+    socket.on('transport-connect', async ({ battle_id, transportId, dtlsParameters }, callback) => {
+        try {
+            const room = await getOrCreateRoom(battle_id);
+            const transport = room.transports.get(transportId);
+            if (!transport) throw new Error(`Transport ${transportId} not found`);
+            await transport.connect({ dtlsParameters });
+            if (callback) callback({});
+        } catch (err) {
+            console.error(err);
+            if (callback) callback({ error: err.message });
+        }
+    });
+
+    socket.on('transport-produce', async ({ battle_id, transportId, kind, rtpParameters }, callback) => {
+        try {
+            const room = await getOrCreateRoom(battle_id);
+            const transport = room.transports.get(transportId);
+            if (!transport) throw new Error(`Transport ${transportId} not found`);
+
+            const producer = await transport.produce({ kind, rtpParameters });
+            room.producers.set(producer.id, { producer, socketId: socket.id, userId: socket.user.user_id });
+
+            producer.on('transportclose', () => {
+                producer.close();
+                room.producers.delete(producer.id);
+            });
+
+            if (callback) callback({ id: producer.id });
+
+            // Broadcast to other users in the room that there is a new producer
+            socket.to(battle_id).emit('newProducer', {
+                producerId: producer.id,
+                socketId: socket.id,
+                userId: socket.user.user_id,
+                name: socket.user.name
+            });
+        } catch (err) {
+            console.error(err);
+            if (callback) callback({ error: err.message });
+        }
+    });
+
+    socket.on('force_mute', async ({ battle_id, userIdToMute }) => {
+        try {
+            // Verify caller is the host of this battle
+            const [check] = await db.execute('SELECT host_id FROM battle WHERE battle_id=?', [battle_id]);
+            if (!check[0] || check[0].host_id !== socket.user.user_id) return;
+
+            const room = await getOrCreateRoom(battle_id);
+            // Find the producer for the targeted userId
+            for (const [producerId, pData] of room.producers.entries()) {
+                if (pData.userId === userIdToMute) {
+                    await pData.producer.pause(); // Mute at the SFU level
+
+                    // Notify the muted user so their UI can update
+                    io.to(pData.socketId).emit('you_were_muted_by_host');
+                    break;
+                }
+            }
+        } catch (err) {
+            console.error('Error in force_mute', err);
+        }
+    });
+
+    socket.on('transport-consume', async ({ battle_id, transportId, producerId, rtpCapabilities }, callback) => {
+        try {
+            const room = await getOrCreateRoom(battle_id);
+            const router = room.router;
+            const transport = room.transports.get(transportId);
+            if (!transport) throw new Error(`Transport ${transportId} not found`);
+
+            if (!router.canConsume({ producerId, rtpCapabilities })) {
+                throw new Error(`cannot consume producer ${producerId}`);
+            }
+
+            const consumer = await transport.consume({
+                producerId,
+                rtpCapabilities,
+                paused: true // Must start paused
+            });
+
+            room.consumers.set(consumer.id, { consumer, socketId: socket.id });
+
+            consumer.on('transportclose', () => {
+                consumer.close();
+                room.consumers.delete(consumer.id);
+            });
+            consumer.on('producerclose', () => {
+                consumer.close();
+                room.consumers.delete(consumer.id);
+                socket.emit('producerClosed', { producerId });
+            });
+
+            if (callback) callback({
+                params: {
+                    id: consumer.id,
+                    producerId: consumer.producerId,
+                    kind: consumer.kind,
+                    rtpParameters: consumer.rtpParameters
+                }
+            });
+        } catch (err) {
+            console.error(err);
+            if (callback) callback({ error: err.message });
+        }
+    });
+
+    socket.on('resume-consumer', async ({ battle_id, consumerId }, callback) => {
+        try {
+            const room = await getOrCreateRoom(battle_id);
+            const cData = room.consumers.get(consumerId);
+            if (cData) {
+                await cData.consumer.resume();
+            }
+            if (callback) callback({});
+        } catch (err) {
+            console.error(err);
+            if (callback) callback({ error: err.message });
+        }
+    });
+
+    socket.on('getProducers', async ({ battle_id }, callback) => {
+        try {
+            const room = await getOrCreateRoom(battle_id);
+            const producerList = [];
+            for (const [producerId, pData] of room.producers.entries()) {
+                if (pData.socketId !== socket.id) {
+                    producerList.push({ producerId, socketId: pData.socketId });
+                }
+            }
+            if (callback) callback({ producers: producerList });
+        } catch (err) {
+            console.error(err);
+            if (callback) callback({ error: err.message });
         }
     });
 
     socket.on('leave_voice', ({ battle_id }) => {
-        socket.to(battle_id).emit('user_left_voice', { socketId: socket.id });
+        cleanupSocketVoice(socket.id, battle_id);
     });
 
     socket.on('disconnect_voice', () => {
-        if (socket.current_battle_id) {
-            socket.to(socket.current_battle_id).emit('user_left_voice', { socketId: socket.id });
-        }
+        if (socket.current_battle_id) cleanupSocketVoice(socket.id, socket.current_battle_id);
     });
 
     socket.on('disconnect', () => {
-        if (socket.current_battle_id) {
-            socket.to(socket.current_battle_id).emit('user_left_voice', { socketId: socket.id });
-        }
+        if (socket.current_battle_id) cleanupSocketVoice(socket.id, socket.current_battle_id);
     });
     await db.execute('update battle set curr_round=curr_round+1');
 }
