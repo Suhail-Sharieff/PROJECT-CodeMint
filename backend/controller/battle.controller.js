@@ -353,5 +353,54 @@ export const setupBattleEvents = async (io, socket) => {
 
     socket.on('solved_question_first', ({ battle_id, user_id, battle_question_id }) => {
         socket.to(battle_id).emit('move_to_next_question')
-    })
+    });
+
+    // --- WebRTC Voice Call Signaling ---
+
+    socket.on('join_voice', ({ battle_id }) => {
+        // Broadcast to all other users in the battle room that this user joined voice
+        socket.to(battle_id).emit('user_joined_voice', { socketId: socket.id, userId: socket.user.user_id, name: socket.user.name });
+    });
+
+    socket.on('webrtc_offer', ({ targetSocketId, callerId, offer }) => {
+        // Relay offer to target
+        io.to(targetSocketId).emit('webrtc_offer', {
+            callerSocketId: socket.id,
+            callerId: callerId,
+            offer: offer
+        });
+    });
+
+    socket.on('webrtc_answer', ({ targetSocketId, answer }) => {
+        // Relay answer to caller
+        io.to(targetSocketId).emit('webrtc_answer', {
+            answererSocketId: socket.id,
+            answer: answer
+        });
+    });
+
+    socket.on('webrtc_ice_candidate', ({ targetSocketId, candidate }) => {
+        if (candidate) {
+            io.to(targetSocketId).emit('webrtc_ice_candidate', {
+                senderSocketId: socket.id,
+                candidate: candidate
+            });
+        }
+    });
+
+    socket.on('leave_voice', ({ battle_id }) => {
+        socket.to(battle_id).emit('user_left_voice', { socketId: socket.id });
+    });
+
+    socket.on('disconnect_voice', () => {
+        if (socket.current_battle_id) {
+            socket.to(socket.current_battle_id).emit('user_left_voice', { socketId: socket.id });
+        }
+    });
+
+    socket.on('disconnect', () => {
+        if (socket.current_battle_id) {
+             socket.to(socket.current_battle_id).emit('user_left_voice', { socketId: socket.id });
+        }
+    });
 }

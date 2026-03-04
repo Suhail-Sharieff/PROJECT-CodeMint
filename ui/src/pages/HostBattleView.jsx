@@ -6,6 +6,8 @@ import {
   Plus, Play, Save, Trash2, Eye, Terminal, UserX, Layout, Activity, Trophy, Timer, Swords,
 } from "lucide-react";
 
+import { VoiceChatControls } from "../components/VoiceChatControls";
+
 const HostBattleView = () => {
   const { session_id } = useParams();
   const battle_id = session_id;
@@ -15,7 +17,7 @@ const HostBattleView = () => {
   const [battleState, setBattleState] = useState(null);
   const [viewMode, setViewMode] = useState("manage");
   const [activeQId, setActiveQId] = useState(null);
-  
+
   const [newQ, setNewQ] = useState({ title: "", description: "", example: "" });
   const [newCase, setNewCase] = useState({ stdin: "", expected_output: "", is_hidden: false });
   const [participants, setParticipants] = useState([]);
@@ -72,7 +74,7 @@ const HostBattleView = () => {
         if (!prev) return prev;
         // Standardize the ID before adding to state
         const newQuestion = { ...q, question_id: q.battle_question_id || q.question_id };
-        
+
         if (prev.questions.some((existing) => existing.question_id === newQuestion.question_id)) return prev;
         return { ...prev, questions: [...prev.questions, newQuestion] };
       });
@@ -139,7 +141,7 @@ const HostBattleView = () => {
       const currentCases = prev.battleCases || [];
       const newCaseObj = {
         ...newCase,
-        question_id: activeQId, 
+        question_id: activeQId,
         case_id: Date.now(),
       };
       return { ...prev, battleCases: [...currentCases, newCaseObj] };
@@ -186,6 +188,7 @@ const HostBattleView = () => {
         </div>
 
         <div className="flex gap-3">
+          <VoiceChatControls battle_id={battle_id} />
           <div className="bg-gray-800 p-1 rounded-lg flex">
             <button onClick={() => setViewMode("manage")} className={`px-4 py-1.5 rounded-md text-sm ${viewMode === "manage" ? "bg-blue-600 text-white" : "text-gray-400"}`}>Arena Setup</button>
             <button onClick={() => setViewMode("monitor")} className={`px-4 py-1.5 rounded-md text-sm ${viewMode === "monitor" ? "bg-blue-600 text-white" : "text-gray-400"}`}>War Room</button>
@@ -252,8 +255,8 @@ const HostBattleView = () => {
             </div>
           ) : (
             <div className="h-full bg-[#161B22] rounded-xl border border-gray-800 flex flex-col overflow-hidden">
-               <div className="p-2 bg-[#21262d] border-b border-gray-800 text-xs px-4">Spying on: {participants.find((p) => p.id === selectedStudentId)?.name || "Nobody"}</div>
-               <div className="flex-1 relative">{selectedStudentId ? <CodeEditor value={getMonitoredCode()} language="javascript" readOnly={true} /> : <div className="h-full flex flex-col items-center justify-center opacity-20"><Eye size={48} /><p>Select warrior to inspect</p></div>}</div>
+              <div className="p-2 bg-[#21262d] border-b border-gray-800 text-xs px-4">Spying on: {participants.find((p) => p.id === selectedStudentId)?.name || "Nobody"}</div>
+              <div className="flex-1 relative">{selectedStudentId ? <CodeEditor value={getMonitoredCode()} language="javascript" readOnly={true} /> : <div className="h-full flex flex-col items-center justify-center opacity-20"><Eye size={48} /><p>Select warrior to inspect</p></div>}</div>
             </div>
           )}
         </div>

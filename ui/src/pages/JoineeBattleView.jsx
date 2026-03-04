@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { useSocket } from "../context/SocketContext";
 import CodeEditor from "./CodeEditor";
 import { Clock, AlertTriangle, Trophy, Zap, CheckCircle } from "lucide-react";
+import { VoiceChatControls } from "../components/VoiceChatControls";
 
 const JoineeBattleView = () => {
   const { session_id } = useParams();
@@ -86,9 +87,9 @@ const JoineeBattleView = () => {
     };
 
     const handleScoreUpdate = (data) => {
-      const { userId, score }=data
+      const { userId, score } = data
       console.log(data);
-      
+
       setParticipants((prev) =>
         prev.map((p) => (p.id === userId ? { ...p, score: score } : p))
       );
@@ -259,11 +260,10 @@ const JoineeBattleView = () => {
       {notification && (
         <div
           className={`fixed top-20 left-1/2 transform -translate-x-1/2 z-50 px-6 py-3 rounded-lg shadow-2xl border flex items-center gap-3 animate-bounce
-                    ${
-                      notification.type === "success"
-                        ? "bg-green-600 border-green-400 text-white"
-                        : "bg-yellow-600 border-yellow-400 text-white"
-                    }`}
+                    ${notification.type === "success"
+              ? "bg-green-600 border-green-400 text-white"
+              : "bg-yellow-600 border-yellow-400 text-white"
+            }`}
         >
           {notification.type === "success" ? (
             <CheckCircle size={20} />
@@ -281,13 +281,12 @@ const JoineeBattleView = () => {
             {battleData.questions.map((_, idx) => (
               <div
                 key={idx}
-                className={`h-2 w-8 rounded-full ${
-                  idx === activeQIndex
+                className={`h-2 w-8 rounded-full ${idx === activeQIndex
                     ? "bg-blue-500 shadow-lg shadow-blue-500/50"
                     : idx < activeQIndex
-                    ? "bg-green-500"
-                    : "bg-gray-700"
-                }`}
+                      ? "bg-green-500"
+                      : "bg-gray-700"
+                  }`}
               />
             ))}
           </div>
@@ -301,6 +300,7 @@ const JoineeBattleView = () => {
         </div>
 
         <div className="flex items-center gap-2">
+          <VoiceChatControls battle_id={battle_id} />
           <span className="text-xs text-gray-500">
             Opponents: {participants.length - 1}
           </span>
@@ -347,11 +347,10 @@ const JoineeBattleView = () => {
               {sortedParticipants.map((p, idx) => (
                 <div
                   key={p.id}
-                  className={`flex justify-between items-center text-xs p-1.5 rounded ${
-                    socket.user?.user_id === p.id
+                  className={`flex justify-between items-center text-xs p-1.5 rounded ${socket.user?.user_id === p.id
                       ? "bg-blue-900/30 border border-blue-800"
                       : "text-gray-400"
-                  }`}
+                    }`}
                 >
                   <div className="flex items-center gap-2">
                     <span className="font-mono w-4">{idx + 1}.</span>
