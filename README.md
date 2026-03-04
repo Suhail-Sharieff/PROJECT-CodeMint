@@ -109,7 +109,7 @@ Key architectural aspects:
 - Backpressure-aware event consumers with retry logic
 - Dead Letter Queues to isolate and analyze failed events
 - Production-grade monitoring with Prometheus and Grafana
-
+- Real time visibility using WebSockets. I chose websockets over SSE (Server sent events) since the we have both reads and writes by and from the client.
 ---
 
 ## Challenges I faced and how I solved them

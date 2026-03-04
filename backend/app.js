@@ -66,15 +66,13 @@ app.use(
 
     )
 )
-export const inspector = (req, res, next) => {
-    console.log(`🔎 Route [${req.method}] ${req.originalUrl}`);
-        console.log(`📦 Body:`, req.body);
-    next();
-};
+// export const inspector = (req, res, next) => {
+//     console.log(`🔎 Route [${req.method}] ${req.originalUrl}`);
+//         console.log(`📦 Body:`, req.body);
+//     next();
+// };
 
-app.use(inspector)
-
-
+// app.use(inspector)
 
 //configuring routes
 import {authRouter} from "./routes/auth.routes.js"
@@ -118,6 +116,7 @@ app.use((err, req, res, next) => {
 });
 
 import path from "path";
+import { rateLimmiter } from "./middleware/rateLimitter.middleware.js";
 app.use('/', (req, res) => {
     res.status(200).sendFile(path.join(process.cwd(), 'index.html'));
 });

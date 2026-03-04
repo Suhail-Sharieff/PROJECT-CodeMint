@@ -29,7 +29,7 @@ const kafka = new Kafka({
     // Retry Logic
     retry: { 
         initialRetryTime: 300, 
-        retries: 10 
+        retries: 3 
     },
 });
 

@@ -1,10 +1,11 @@
 import { Router } from "express";
 import { verifyJWT } from "../middleware/auth.middleware.js";
+import { rateLimmiter } from "../middleware/rateLimitter.middleware.js";
 import { getTestAnalysis, getTestHostID, getTestsAttendedByMe, getTestsByMe } from "../controller/test.controller.js";
 
 const testRouter=Router()
 
-testRouter.use(verifyJWT)
+testRouter.use(verifyJWT,rateLimmiter)
 
 testRouter
 .route('/getTestsByMe')

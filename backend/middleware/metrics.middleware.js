@@ -1,11 +1,12 @@
-import { apiRequestCounter, apiRequestDuration } from "../Utils/promethus_connection.utils.js";
+import { apiRequestCounter, apiRequestDuration } from "../Utils/custom_prometheus_metrics.util.js";
 
 export const metricsMiddleware = (req, res, next) => {
   const startTime = Date.now();
   const originalSend = res.send;
 
   res.send = function(data) {
-    const duration = (Date.now() - startTime) / 1000; // Convert to seconds
+    const durationMs = Date.now() - startTime;
+    const durationSec = durationMs / 1000;
     const statusCode = res.statusCode;
     const route = req.route?.path || req.path;
 
@@ -22,12 +23,12 @@ export const metricsMiddleware = (req, res, next) => {
         route: route,
         status_code: statusCode
       },
-      duration
+      durationSec
     );
 
-    console.log(`📊 Metrics: ${req.method} ${route} [${statusCode}] ${duration.toFixed(3)}s`);
+    console.log(`📊 Metrics: ${req.method} ${route} [${statusCode}] ${durationMs}ms`);
 
-    // Call the original send
+    // recorded metrics, now v can call nxt meth
     return originalSend.call(this, data);
   };
 

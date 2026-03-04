@@ -1,10 +1,22 @@
 import { Kafka, Partitioners } from "kafkajs";
 import { db } from "./sql_connection.js"; 
 
-// we need new prdcuer for handling studff in dlq
+// we need new producer for handling stuff in dlq
+// reuse the same broker parsing logic we use elsewhere to strip protocols
+const rawKafka = process.env.KAFKA_ORIGIN || "localhost:9092";
+const parseBroker = (broker) => {
+    broker = broker.trim();
+    if (broker.startsWith('http://') || broker.startsWith('https://')) {
+        return broker.replace(/^https?:\/\//, '');
+    }
+    return broker;
+};
+const brokers = rawKafka.split(',').map(parseBroker).filter(b => b);
+
+console.log("DLQ worker connecting to brokers:", brokers);
 const kafka = new Kafka({
     clientId: "codemint_dlq_worker",
-    brokers: (process.env.KAFKA_ORIGIN || "localhost:9092").split(','),
+    brokers: brokers,
 });
 
 const producer = kafka.producer({
@@ -20,9 +32,10 @@ export const processDLQ = async () => {
     try {
         await producer.connect();
 
+        // NOTE: MySQL does not allow parameter binding for LIMIT values in some drivers,
+        // so interpolate the batch size directly to avoid ER_WRONG_ARGUMENTS errors.
         const [rows] = await db.execute(
-            `SELECT id, topic, payload FROM kafka_dlq ORDER BY created_at ASC LIMIT ?`, 
-            [BATCH_SIZE]
+            `SELECT id, topic, payload FROM kafka_dlq ORDER BY created_at ASC LIMIT ${BATCH_SIZE}`
         );
 
         if (rows.length === 0) {

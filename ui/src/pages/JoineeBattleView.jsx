@@ -62,6 +62,8 @@ const JoineeBattleView = () => {
           setCurrentLang(saved.language);
         }
       }
+
+      setActiveQIndex(state.curr_round)
     };
 
     const handleStart = ({ duration }) => {

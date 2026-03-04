@@ -19,11 +19,11 @@ export const getBattlesByMe = asyncHandler(
     }
 );
 
-export const getBattlesAttendedByMe=asyncHandler(
-    async(req,res)=>{
-        try{
-            const {user_id}=req.user
-            const query=`WITH cte AS (
+export const getBattlesAttendedByMe = asyncHandler(
+    async (req, res) => {
+        try {
+            const { user_id } = req.user
+            const query = `WITH cte AS (
                 SELECT 
                     x.battle_id, x.user_id, z.name,z.email,x.role, x.status AS user_status, x.joined_at, x.score,
                     y.host_id, y.title, y.status AS battle_status, y.created_at, y.duration, y.start_time
@@ -51,10 +51,10 @@ export const getBattlesAttendedByMe=asyncHandler(
             FROM cte LEFT JOIN battle_submissions x ON cte.battle_id = x.battle_id AND cte.user_id = x.user_id LEFT JOIN battle_question m ON x.battle_question_id = m.battle_question_id
             GROUP BY cte.battle_id, cte.user_id, cte.role, cte.user_status, cte.joined_at, cte.score, cte.title, cte.duration, cte.start_time
             ORDER BY cte.score DESC;`
-            const [rows]=await db.execute(query,[user_id])
-            return res.status(200).json(new ApiResponse(200,rows,`Fetched battles user_id=${user_id} attended !`))
-        }catch(err){
-            return res.status(400).json(new ApiError(400,err.message))
+            const [rows] = await db.execute(query, [user_id])
+            return res.status(200).json(new ApiResponse(200, rows, `Fetched battles user_id=${user_id} attended !`))
+        } catch (err) {
+            return res.status(400).json(new ApiError(400, err.message))
         }
     }
 )
@@ -103,8 +103,8 @@ const createbattle = async (user_id, battle_id, duration = 10, title) => {
         if (!user_id) throw new ApiError(400, `No user_id provided by SocketManager to create battle!`)
         if (!battle_id) throw new ApiError(400, `No battle_id provided by SocketManager to create battle!`)
 
-        const query = 'insert into battle (battle_id,host_id,duration,title) values(?,?,?,?)'
-        const [rows] = await db.execute(query, [battle_id, user_id, duration, title])
+        const query = 'insert into battle (battle_id,host_id,duration,title,curr_round) values(?,?,?,?,?)'
+        const [rows] = await db.execute(query, [battle_id, user_id, duration, title, 0])
         if (rows.length === 0) throw new ApiError(400, "Unabe to create battle!")
 
 
@@ -159,7 +159,7 @@ export const setupBattleEvents = async (io, socket) => {
 
     socket.on('create_battle', async ({ duration, title }) => {
         const battle_id = uuidv4();
-        
+
         console.log('battle creation');
 
         const finalDuration = parseInt(duration) || 60;
@@ -172,10 +172,10 @@ export const setupBattleEvents = async (io, socket) => {
 
     socket.on('join_battle', async ({ battle_id }) => {
         try {
-            
+
             const { user_id, name } = socket.user;
 
-            const [battleRows] = await db.execute('SELECT host_id, status, start_time, duration FROM battle WHERE battle_id = ?', [battle_id]);
+            const [battleRows] = await db.execute('SELECT host_id, status, start_time, duration,curr_round FROM battle WHERE battle_id = ?', [battle_id]);
             if (battleRows.length === 0) return socket.emit('error', { message: "battle not found" });
 
             const battleMeta = battleRows[0];
@@ -246,11 +246,12 @@ export const setupBattleEvents = async (io, socket) => {
                 status: battleMeta.status,
                 role,
                 questions,
-                battleCases, 
+                battleCases,
                 savedCode,
                 users,
                 timeLeft,
                 duration: battleMeta.duration,
+                curr_round: battleMeta.curr_round
             });
 
             if (role === 'joinee') {
@@ -270,7 +271,7 @@ export const setupBattleEvents = async (io, socket) => {
             [battle_id, title, description, example]
         );
         const battle_question_id = res.insertId;
-        
+
         io.to(battle_id).emit('battle_question_added', { battle_question_id, battle_id, title, description, example });
     });
 
@@ -279,7 +280,7 @@ export const setupBattleEvents = async (io, socket) => {
             'INSERT INTO battlecase (battle_question_id, stdin, expected_output, is_hidden) VALUES (?,?,?,?)',
             [battle_question_id, stdin, expected_output, is_hidden]
         );
-        
+
     });
 
     socket.on('start_battle', async ({ battle_id }) => {
@@ -340,7 +341,7 @@ export const setupBattleEvents = async (io, socket) => {
     socket.on('battle_score_update', async ({ battle_id, battle_question_id, score }) => {
 
         await db.execute('UPDATE battle_submissions SET score = ? WHERE battle_id = ? AND battle_question_id = ? AND user_id = ?', [score, battle_id, battle_question_id, socket.user.user_id]);
-        
+
         const [sumRows] = await db.execute('SELECT SUM(score) as total_score FROM battle_submissions WHERE battle_id = ? AND user_id = ?', [battle_id, socket.user.user_id]);
         const totalScore = parseInt(sumRows[0].total_score) || 0;
 
@@ -351,7 +352,7 @@ export const setupBattleEvents = async (io, socket) => {
     });
 
 
-    socket.on('solved_question_first', ({ battle_id, user_id, battle_question_id }) => {
+    socket.on('solved_question_first', async ({ battle_id, user_id, battle_question_id }) => {
         socket.to(battle_id).emit('move_to_next_question')
     });
 
@@ -400,7 +401,8 @@ export const setupBattleEvents = async (io, socket) => {
 
     socket.on('disconnect', () => {
         if (socket.current_battle_id) {
-             socket.to(socket.current_battle_id).emit('user_left_voice', { socketId: socket.id });
+            socket.to(socket.current_battle_id).emit('user_left_voice', { socketId: socket.id });
         }
     });
+    await db.execute('update battle set curr_round=curr_round+1');
 }
