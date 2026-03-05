@@ -93,7 +93,7 @@ export const produceEvent = async (topic, data) => {
         console.log(`📤 KAFKA producing into topic=[${topic}]`);
         
         // IMP: Backpressure & Reliability managed here by settng acks:-1, backpresure helps in ensuring that proucer and consumer are compatibel with theri speedsd of producin and consumin
-        // acks: -1 ensures leader and replicas confirm receipt
+        // acks: -1 ensures leader and replicas confirm receipt(so its Atleast once guarantee), so our msg is never lost and since we have set idempotency as true above we avoid reducndant events too
         await producer.send({
             topic,
             messages: [{ 
