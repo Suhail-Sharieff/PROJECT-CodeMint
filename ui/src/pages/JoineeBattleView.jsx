@@ -237,6 +237,8 @@ const JoineeBattleView = () => {
 
   // If game over (ran out of questions)
   if (activeQIndex >= battleData.questions.length) {
+    console.log(activeQIndex+" "+activeQ+" "+activeQ);
+    
     return (
       <div className="h-screen flex flex-col items-center justify-center bg-[#0D1117] text-white gap-6">
         <Trophy size={80} className="text-yellow-400" />

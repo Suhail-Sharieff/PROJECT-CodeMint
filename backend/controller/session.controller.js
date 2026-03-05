@@ -178,13 +178,14 @@ async function setupSessionEvents(socket, io) {
 
         const query = 'UPDATE session_codes SET code=? WHERE session_id=? AND user_id=?'
 
-        await produceEvent(Topics.DB_TOPIC, {
+        await produceEvent(Topics.SESSION_TOPIC.name, {
             type: Events.DB_QUERY.type,
             payload: {
                 desc: `host_code_change in session_id=${session_id} user_id=${user_id}`,
                 query: query,
                 params: [new_code, session_id, user_id]
-            }
+            },
+            key:session_id
         })
 
         socket.to(session_id).emit('host_code_update', new_code);
@@ -194,13 +195,14 @@ async function setupSessionEvents(socket, io) {
     socket.on('host_language_change', async ({ session_id, language }) => {
         const query = 'UPDATE session_codes SET code_lang=? WHERE session_id=? AND user_id=?'
         // await db.execute(query, [language, session_id, user_id]);
-        await produceEvent(Topics.DB_TOPIC, {
+        await produceEvent(Topics.SESSION_TOPIC.name, {
             type: Events.DB_QUERY.type,
             payload: {
                 desc: `host_language_change in session_id=${session_id} user_id=${user_id}`,
                 query: query,
                 params: [language, session_id, user_id]
-            }
+            },
+            key:session_id
         })
         socket.to(session_id).emit('language_change', language);
     });
@@ -220,13 +222,14 @@ async function setupSessionEvents(socket, io) {
             params = [session_id, user_id, code, 'javascript']
         }
         // await db.execute(query,params );
-        await produceEvent(Topics.DB_TOPIC, {
+        await produceEvent(Topics.SESSION_TOPIC.name, {
             type: Events.DB_QUERY.type,
             payload: {
                 desc: `joinee_code_change in session_id=${session_id} user_id=${user_id}`,
                 query: query,
                 params: params
-            }
+            },
+            key:session_id
         })
 
 
@@ -237,13 +240,14 @@ async function setupSessionEvents(socket, io) {
     socket.on('send_message', async ({ session_id, message }) => {
         const query = 'INSERT INTO messages(session_id, user_id, message) VALUES(?,?,?)'
         // await db.execute(query, [session_id, user_id, message]);
-        await produceEvent(Topics.DB_TOPIC, {
+        await produceEvent(Topics.SESSION_TOPIC.name, {
             type: Events.DB_QUERY.type,
             payload: {
                 desc: `send_message in session_id=${session_id} user_id=${user_id}`,
                 query: query,
                 params: [session_id, user_id, message]
-            }
+            },
+            key:session_id
         })
         const msgPayload = { message, sender: name, timestamp: new Date() };
         socket.to(session_id).emit('chat_message', msgPayload);

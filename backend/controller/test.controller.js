@@ -250,13 +250,14 @@ async function setupTestEvents(socket,io) {
             //          ON DUPLICATE KEY UPDATE joined_at=NOW()`,
             //     [test_id, user_id, role]
             // );
-            await produceEvent(Topics.DB_TOPIC,{
+            await produceEvent(Topics.TEST_TOPIC.name,{
                 type:Events.DB_QUERY.type,
                 payload:{
                     desc:`Inserting user_id=${user_id} into test_id=${test_id} as ${role}`,
                     query:`INSERT INTO test_participant (test_id, user_id, role) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE joined_at=NOW()`,
                     params:[test_id, user_id, role]
-                }
+                },
+                key:test_id
             })
 
             
@@ -335,13 +336,14 @@ async function setupTestEvents(socket,io) {
         
         
         const query='INSERT INTO testcase (question_id, stdin, expected_output, is_hidden) VALUES (?,?,?,?)'
-        await produceEvent(Topics.DB_TOPIC,{
+        await produceEvent(Topics.TEST_TOPIC.name,{
             type:Events.DB_QUERY.type,
             payload:{
                 desc:`add_testcase event`,
                 query:query,
                 params:[question_id, stdin, expected_output, is_hidden]
-            }
+            },
+            key:question_id
         })
         
         
@@ -394,13 +396,14 @@ async function setupTestEvents(socket,io) {
         ON DUPLICATE KEY UPDATE code=?, language=?, last_updated=NOW()
     `
         // await db.execute(query, [test_id, question_id, user_id, code, language, code, language]);
-        await produceEvent(Topics.DB_TOPIC,{
+        await produceEvent(Topics.TEST_TOPIC.name,{
             type:Events.DB_QUERY.type,
             payload:{
                 desc:`saving code of user_id=${user_id} in test_id=${test_id} for question_id=${question_id}`,
                 query:query,
                 params:[test_id, question_id, user_id, code, language, code, language]
-            }
+            },
+            key:test_id
         });
 
         

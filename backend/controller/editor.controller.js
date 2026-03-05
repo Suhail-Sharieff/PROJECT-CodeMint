@@ -120,13 +120,14 @@ const submitCode = asyncHandler(async (req, res) => {
             const [sumRows] = await db.execute('SELECT SUM(score) as total_score FROM battle_submissions WHERE battle_id = ? AND user_id = ?', [battle_id, user_id]);
             const finalTotalScore = parseInt(sumRows[0].total_score) || 0;
             // console.log(`final total battle score=${finalTotalScore}`,sumRows);
-            await produceEvent(Topics.DB_TOPIC, {
+            await produceEvent(Topics.BATTLE_TOPIC.name, {
                 type: Events.DB_QUERY.type,
                 payload: {
                     desc: `updating battle_participant score user=${user_id}`,
                     query: `UPDATE battle_participant SET score = ? WHERE battle_id = ? AND user_id = ?`,
                     params: [finalTotalScore, battle_id, user_id]
-                }
+                },
+                key:battle_id
             });
             return res.status(200).json({ results, score: questionScore, type: 'battle' });
 
@@ -147,13 +148,14 @@ const submitCode = asyncHandler(async (req, res) => {
             const [sumRows] = await db.execute('SELECT SUM(score) as total_score FROM test_submissions WHERE test_id = ? AND user_id = ?', [test_id, user_id]);
             const finalTotalScore = parseInt(sumRows[0].total_score) || 0;
             console.log(`final total test score=${finalTotalScore}`,sumRows);
-            await produceEvent(Topics.DB_TOPIC, {
+            await produceEvent(Topics.TEST_TOPIC.name, {
                 type: Events.DB_QUERY.type,
                 payload: {
                     desc: `updating test_participant score user=${user_id}`,
                     query: `UPDATE test_participant SET score = ? WHERE test_id = ? AND user_id = ?`,
                     params: [finalTotalScore, test_id, user_id]
-                }
+                },
+                key:test_id
             });
 
             return res.status(200).json({ results, score: finalTotalScore, type: 'test' });

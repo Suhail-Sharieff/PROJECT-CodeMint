@@ -5,6 +5,8 @@ import { ApiError } from "../Utils/Api_Error.utils.js";
 import { asyncHandler } from "../Utils/AsyncHandler.utils.js";
 import { ApiResponse } from "../Utils/Api_Response.utils.js";
 import { getWorker, mediasoupConfig } from "../Utils/mediasoup.js";
+import { produceEvent } from "../Utils/kafka_connection.js";
+import { Events, Topics } from "../Utils/kafka_events.js";
 
 const roomState = new Map();
 
@@ -201,6 +203,8 @@ export const setupBattleEvents = async (io, socket) => {
             const battleMeta = battleRows[0];
             const role = (battleMeta.host_id === user_id) ? 'host' : 'joinee';
 
+            // console.log(battleMeta.status);
+            
             if (battleMeta.status === 'ENDED') {
                 socket.emit('error', { message: "This battle has ended already" });
                 return;
@@ -343,12 +347,18 @@ export const setupBattleEvents = async (io, socket) => {
 
         const { battle_id, battle_question_id, code, language } = data
         // console.log(data);
-
-        await db.execute(`
-             INSERT INTO battle_submissions (battle_id, battle_question_id, user_id, code, language)
+        const query=`INSERT INTO battle_submissions (battle_id, battle_question_id, user_id, code, language)
              VALUES (?, ?, ?, ?, ?)
-             ON DUPLICATE KEY UPDATE code=?, language=?, last_updated=NOW()
-         `, [battle_id, battle_question_id, user_id, code, language, code, language]);
+             ON DUPLICATE KEY UPDATE code=?, language=?, last_updated=NOW()`
+        const params=[battle_id, battle_question_id, user_id, code, language, code, language]
+        await produceEvent(Topics.BATTLE_TOPIC.name,{
+            type:Events.DB_QUERY.type,
+            payload:{
+                desc: `saving battle code of battle_id=${battle_id} for user_id=${user_id}`,
+                query:query,
+                params:params
+            }
+        })
 
         socket.to(battle_id).emit('battle_participant_code_update', {
             userId: user_id,
@@ -373,6 +383,7 @@ export const setupBattleEvents = async (io, socket) => {
 
 
     socket.on('solved_question_first', async ({ battle_id, user_id, battle_question_id }) => {
+        await db.execute('UPDATE battle SET curr_round = curr_round + 1 WHERE battle_id = ?', [battle_id]);
         socket.to(battle_id).emit('move_to_next_question')
     });
 
@@ -592,5 +603,4 @@ export const setupBattleEvents = async (io, socket) => {
     socket.on('disconnect', () => {
         if (socket.current_battle_id) cleanupSocketVoice(socket.id, socket.current_battle_id);
     });
-    await db.execute('update battle set curr_round=curr_round+1');
 }

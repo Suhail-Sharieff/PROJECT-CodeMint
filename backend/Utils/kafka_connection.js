@@ -39,7 +39,6 @@ const producer = kafka.producer({
     idempotent: true, // to Prevent duplicates processing of msgs
     allowAutoTopicCreation: false,
 });
-const consumer = kafka.consumer({ groupId: "codemint_kafka_groupId" });
 
 // --- DLQ(Dead letter queue to manage failed events), later v will create another worker to handle DLQ events for max 10 times
 const saveToDeadLetterQueue = async (topic, data, errorMsg) => {
@@ -58,19 +57,21 @@ export const connectKafka = async () => {
         console.log("Connecting to Kafka Admin & Producer...");
         await admin.connect();
         await producer.connect();
-
+        
         // create new topics after chk
         const existingTopics = await admin.listTopics();
+        // console.log(`KAFKA TOPICS INFO: ${JSON.stringify(admin.fetchTopicMetadata({topics:existingTopics}))}`);
+
         const newTopics = topicsToCreate
-            .filter(t => !existingTopics.includes(t))
+            .filter(t => !existingTopics.includes(t.name))
             .map(t => ({
-                topic: t,
-                numPartitions: 1,
-                replicationFactor: 1
+                topic: t.name,
+                numPartitions: 8,//usually it should be 2 or 3 times the nConcurrent users we have
+                replicationFactor: 1//1 leader and 1 follower
             }));
 
         if (newTopics.length > 0) {
-            console.log(`⚠️ Creating topics: ${newTopics.map(t => t.topic).join(", ")}`);
+            console.log(`⚠️ Creating topics: ${newTopics.map(t => t.topic.name).join(", ")}`);
             await admin.createTopics({ topics: newTopics });
             console.log("✅ Topics created.");
         }
@@ -93,14 +94,17 @@ export const produceEvent = async (topic, data) => {
         console.log(`📤 KAFKA producing into topic=[${topic}]`);
         
         // IMP: Backpressure & Reliability managed here by settng acks:-1, backpresure helps in ensuring that proucer and consumer are compatibel with theri speedsd of producin and consumin
-        // acks: -1 ensures leader and replicas confirm receipt(so its Atleast once guarantee), so our msg is never lost and since we have set idempotency as true above we avoid reducndant events too
+        // acks: -1 ensures leader and replicas confirm receipt, this also ensured backpressure, so fast commits will result in presuree
+        // console.log(data);
+        
         await producer.send({
             topic,
             messages: [{ 
-                key: data.session_id ? String(data.session_id) : undefined, //===TODO: i can assign sessin_id so that kafka can ensure ordering too
+                //v dont specify partition here so kafka will auto balance it
+                key: data.key ? String(data.key) : undefined, //===TODO: i can assign sessin_id so that kafka can ensure ordering too, ie an event of same id goes to same partiton
                 value: JSON.stringify(data) 
             }],
-            acks: -1, 
+            acks: -1, //means 'all', all replicas should acknowldge yes, then only treat as successS
         });
 
     } catch (err) {
@@ -111,40 +115,55 @@ export const produceEvent = async (topic, data) => {
 
 export const startDynamicConsumer = async (topics) => {
     try {
-        await consumer.connect();
-        await consumer.subscribe({ topics: topics, fromBeginning: true });
+        console.log(topics);
+        
+        for (const {name, group} of topics) {
 
-        await consumer.run({
-            autoCommit: false, //to manually cntrl success of event
-            eachMessage: async ({ topic, partition, message }) => {
-                const offset = message.offset;
-                try {
-                    const parsedMsg = JSON.parse(message.value.toString());
-                    const { type, payload } = parsedMsg;
+            console.log(name+" "+group);
+            
 
-                    const handler = eventRegistry[type];
+            
+            const myConsumer = kafka.consumer({ groupId: group });
 
-                    if (handler) {//commit if success
-                        console.log(`📥 Processing [${type}] from [${topic}]`);
-                        await handler(payload);
+            await myConsumer.connect();
+            await myConsumer.subscribe({ topic:name, fromBeginning: true });
+
+            console.log('connected and subsribed, running......');
+            
+
+            myConsumer.run({
+                autoCommit: false, //to manually cntrl success of event
+                eachMessage: async ({ topic, partition, message }) => {
+                    const offset = message.offset;
+                    try {
+                        const parsedMsg = JSON.parse(message.value.toString());
+                        const { type, payload } = parsedMsg;
+
+                        const handler = eventRegistry[type];
+
+                        if (handler) {//commit if success
+                            console.log(`📥 Processing [${type}] from TOPIC: [${topic}] GROUP:[${group}] PARTITION:${partition}`);
+                            await handler(payload);
+
+                            //since we r manually commiting, out arch is at-least once type delivery
+                            await myConsumer.commitOffsets([{ topic, partition, offset: (BigInt(offset) + 1n).toString() }]);
+                        } else {
+                            console.warn(`⚠️ No handler for event type: [${type}]`);
+                            // Commit anyway to skip unknown messages preventing block,
+                            await myConsumer.commitOffsets([{ topic, partition, offset: (BigInt(offset) + 1n).toString() }]);
+                        }
+
+                    } catch (processingError) {
+                        console.error(`❌ Consumer Error on topic ${topic}:`, processingError.message);
                         
-                        await consumer.commitOffsets([{ topic, partition, offset: (BigInt(offset) + 1n).toString() }]);
-                    } else {
-                        console.warn(`⚠️ No handler for event type: [${type}]`);
-                        // Commit anyway to skip unknown messages preventing block
-                        await consumer.commitOffsets([{ topic, partition, offset: (BigInt(offset) + 1n).toString() }]);
+                        // Decision: Do we block or skip?
+                        // For now, we Log & Skip (Commit) so we don't crash the specific partition.
+                        // Ideally, you would write THIS to a "Consumer DLQ" here.
+                        await myConsumer.commitOffsets([{ topic, partition, offset: (BigInt(offset) + 1n).toString() }]);
                     }
-
-                } catch (processingError) {
-                    console.error(`❌ Consumer Error on topic ${topic}:`, processingError.message);
-                    
-                    // Decision: Do we block or skip?
-                    // For now, we Log & Skip (Commit) so we don't crash the specific partition.
-                    // Ideally, you would write THIS to a "Consumer DLQ" here.
-                    await consumer.commitOffsets([{ topic, partition, offset: (BigInt(offset) + 1n).toString() }]);
-                }
-            },
-        });
+                },
+            });
+        }
         console.log("✅ Kafka Consumer listening...");
     } catch (err) {
         console.error("❌ Error starting consumer:", err);
@@ -152,13 +171,14 @@ export const startDynamicConsumer = async (topics) => {
 };
 
 export const testApi = asyncHandler(async(req, res) => {
-    await produceEvent(Topics.DB_TOPIC, {
+    await produceEvent(Topics.SESSION_TOPIC.name, {
         type: Events.DB_QUERY.type, 
         payload: { 
             desc: "Making bulk inserts",
             query: "INSERT INTO messages(session_id, user_id, message) VALUES (?, ?, ?)",
             params: ["f9b794a2-4ff8-4f8c-8c06-9655c10b938e", 1, "Hello World"]
-        }
+        },
+        key:"session_key"
     });
 
     return res.status(200).json(new ApiResponse(200, "Event Dispatched (or Saved to DLQ)!"));

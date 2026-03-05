@@ -11,14 +11,20 @@ const handleDbQuery = async (payload) => {
 };
 
 
-export class Topics{
-    static DB_TOPIC="db_topic"
+
+export const Topics={
+    SESSION_TOPIC:{
+        name:"session_topic",
+        group:"session_group"
+    },
+    BATTLE_TOPIC:{name:"battle_topic",group:"battle_group"},
+    TEST_TOPIC:{name:"test_topic",group:"test_group"}
 }
 export const Events = {
     DB_QUERY: {
-        type: "db_query",
+        type:"db_query",
         handler: handleDbQuery
-    }
+    },
 };
 
 
