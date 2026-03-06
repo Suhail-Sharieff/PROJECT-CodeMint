@@ -9,3 +9,4 @@
 ## Working
 <video src="./assets/eg_vid.mp4" width="500" controls></video>
 
+*If video doesn't load, try: [Download demo video](./assets/eg_vid.mp4)*
