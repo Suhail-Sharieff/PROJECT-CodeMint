@@ -6,3 +6,7 @@
 - Added 3 topics mapped to 3 consumer groups, each for session,battle and test along with adding partitions and increased performance 
 ## New Architecture
 <![Architecture](./assets/system_design.drawio.png)>
+## Working
+<video src="./assets/eg_vid.mp4" width="500" controls></video>
+
+*If video doesn't load, try: [Download demo video](./assets/eg_vid.mp4)*
