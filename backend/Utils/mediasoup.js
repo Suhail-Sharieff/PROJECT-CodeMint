@@ -42,8 +42,8 @@ export const mediasoupConfig = {
         // Here we provide the IP to bind to. In production, this should be the public IP.
         listenIps: [
             {
-                ip: process.env.MEDIASOUP_LISTEN_IP || '127.0.0.1',
-                // announcedIp: process.env.MEDIASOUP_ANNOUNCED_IP // Set for production (EC2 etc)
+                ip: process.env.MEDIASOUP_LISTEN_IP || '0.0.0.0',
+                announcedIp: process.env.MEDIASOUP_ANNOUNCED_IP || '127.0.0.1'
             },
         ],
         enableUdp: true,
