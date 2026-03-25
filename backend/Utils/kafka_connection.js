@@ -1,7 +1,7 @@
 import { Kafka, Partitioners } from "kafkajs"; // [FIX] Added Partitioners
 import { asyncHandler } from "./AsyncHandler.utils.js";
 import { Events, Topics } from "./kafka_events.js";
-import { db } from "./sql_connection.js"; 
+import { db } from "./sql_connection.js";
 import { ApiResponse } from "./Api_Response.utils.js";
 import { processDLQ } from "./dlq_worker.js";
 
@@ -12,7 +12,7 @@ const eventRegistry = Object.fromEntries(
 const topicsToCreate = Object.values(Topics);
 
 // broker config
-const kafkaOrigin = process.env.KAFKA_ORIGIN
+const kafkaOrigin = `http://${process.env.KAFKA_ORIGIN}`
 const rawBrokers = kafkaOrigin.split(',').map(broker => broker.trim()).filter(broker => broker);
 const parseBroker = (broker) => {
     if (broker.startsWith('http://') || broker.startsWith('https://')) {
@@ -27,9 +27,9 @@ const kafka = new Kafka({
     clientId: "codemint_kafka_clientId",
     brokers: brokers,
     // Retry Logic
-    retry: { 
-        initialRetryTime: 300, 
-        retries: 3 
+    retry: {
+        initialRetryTime: 300,
+        retries: 3
     },
 });
 
@@ -57,7 +57,7 @@ export const connectKafka = async () => {
         console.log("Connecting to Kafka Admin & Producer...");
         await admin.connect();
         await producer.connect();
-        
+
         // create new topics after chk
         const existingTopics = await admin.listTopics();
         // console.log(`KAFKA TOPICS INFO: ${JSON.stringify(admin.fetchTopicMetadata({topics:existingTopics}))}`);
@@ -83,7 +83,7 @@ export const connectKafka = async () => {
             processDLQ();
         }, 10 * 60 * 1000);
         console.log(`✅ DLQ(dead letter queue) worker started`);
-        
+
     } catch (err) {
         console.error("❌ Kafka Connection Error:", err);
     }
@@ -92,17 +92,17 @@ export const connectKafka = async () => {
 export const produceEvent = async (topic, data) => {
     try {
         console.log(`📤 KAFKA producing into topic=[${topic}]`);
-        
+
         // IMP: Backpressure & Reliability managed here by settng acks:-1, backpresure helps in ensuring that proucer and consumer are compatibel with theri speedsd of producin and consumin
         // acks: -1 ensures leader and replicas confirm receipt, this also ensured backpressure, so fast commits will result in presuree
         // console.log(data);
-        
+
         await producer.send({
             topic,
-            messages: [{ 
+            messages: [{
                 //v dont specify partition here so kafka will auto balance it
                 key: data.key ? String(data.key) : undefined, //===TODO: i can assign sessin_id so that kafka can ensure ordering too, ie an event of same id goes to same partiton
-                value: JSON.stringify(data) 
+                value: JSON.stringify(data)
             }],
             acks: -1, //means 'all', all replicas should acknowldge yes, then only treat as successS
         });
@@ -116,20 +116,20 @@ export const produceEvent = async (topic, data) => {
 export const startDynamicConsumer = async (topics) => {
     try {
         console.log(topics);
-        
-        for (const {name, group} of topics) {
 
-            console.log(name+" "+group);
-            
+        for (const { name, group } of topics) {
 
-            
+            console.log(name + " " + group);
+
+
+
             const myConsumer = kafka.consumer({ groupId: group });
 
             await myConsumer.connect();
-            await myConsumer.subscribe({ topic:name, fromBeginning: true });
+            await myConsumer.subscribe({ topic: name, fromBeginning: true });
 
             console.log('connected and subsribed, running......');
-            
+
 
             myConsumer.run({
                 autoCommit: false, //to manually cntrl success of event
@@ -155,7 +155,7 @@ export const startDynamicConsumer = async (topics) => {
 
                     } catch (processingError) {
                         console.error(`❌ Consumer Error on topic ${topic}:`, processingError.message);
-                        
+
                         // Decision: Do we block or skip?
                         // For now, we Log & Skip (Commit) so we don't crash the specific partition.
                         // Ideally, you would write THIS to a "Consumer DLQ" here.
@@ -170,15 +170,15 @@ export const startDynamicConsumer = async (topics) => {
     }
 };
 
-export const testApi = asyncHandler(async(req, res) => {
+export const testApi = asyncHandler(async (req, res) => {
     await produceEvent(Topics.SESSION_TOPIC.name, {
-        type: Events.DB_QUERY.type, 
-        payload: { 
+        type: Events.DB_QUERY.type,
+        payload: {
             desc: "Making bulk inserts",
             query: "INSERT INTO messages(session_id, user_id, message) VALUES (?, ?, ?)",
             params: ["f9b794a2-4ff8-4f8c-8c06-9655c10b938e", 1, "Hello World"]
         },
-        key:"session_key"
+        key: "session_key"
     });
 
     return res.status(200).json(new ApiResponse(200, "Event Dispatched (or Saved to DLQ)!"));

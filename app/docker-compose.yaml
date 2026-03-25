@@ -19,9 +19,9 @@ services:
       - .env
     environment:
       DB_HOST: codemint_mysql_service   # override safe
-      REDIS_ORIGIN: redis_cache
-      KAFKA_ORIGIN: kafka_service
-      JUDGE0_ORIGIN: server
+      REDIS_ORIGIN: redis_cache:6379
+      KAFKA_ORIGIN: kafka_service:9092
+      JUDGE0_ORIGIN: server:2358
     depends_on:
       - codemint_mysql_service
       - redis_cache

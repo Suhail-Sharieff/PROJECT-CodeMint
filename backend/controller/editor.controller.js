@@ -1,7 +1,7 @@
 import { ApiError } from "../Utils/Api_Error.utils.js";
 import { asyncHandler } from "../Utils/AsyncHandler.utils.js";
 import axios from "axios";
-import { db } from "../Utils/sql_connection.js"; 
+import { db } from "../Utils/sql_connection.js";
 import { produceEvent } from "../Utils/kafka_connection.js";
 import { Events, Topics } from "../Utils/kafka_events.js";
 
@@ -9,7 +9,7 @@ const JUDGE0 = process.env.JUDGE0_ORIGIN;
 
 const getLanguages = asyncHandler(async (req, res) => {
     try {
-        const response = await axios.get(`${JUDGE0}/languages`);
+        const response = await axios.get(`http://${JUDGE0}/languages`);
         return res.status(200).json(response.data);
     } catch (err) {
         return res.status(400).json(new ApiError(400, err.message));
@@ -31,7 +31,7 @@ const constants_body = {
 };
 
 const submitCode = asyncHandler(async (req, res) => {
-    const { language_id, source_code, stdin, expected_output, question_id,isBattle=false } = req.body;
+    const { language_id, source_code, stdin, expected_output, question_id, isBattle = false } = req.body;
     const user_id = req.user.user_id;
 
     if (!language_id || !source_code) throw new ApiError(400, "language_id/source_code missing!");
@@ -39,7 +39,7 @@ const submitCode = asyncHandler(async (req, res) => {
     try {
         //if ruuning in coding env, ie neither a ballte nor a test, then obvuiosly queston id doent exists for it, so no need to deal with score for it
         if (!question_id) {
-            const response = await axios.post(`${JUDGE0}/submissions`,
+            const response = await axios.post(`http://${JUDGE0}/submissions`,
                 { language_id, source_code, stdin, expected_output, ...constants_body },
                 { params: { base64_encoded: false, wait: true } }
             );
@@ -62,7 +62,7 @@ const submitCode = asyncHandler(async (req, res) => {
         let passedCount = 0;
         const promises = dbCases.map(async (testCase) => {
             try {
-                const judgeRes = await axios.post(`${JUDGE0}/submissions`,
+                const judgeRes = await axios.post(`http://${JUDGE0}/submissions`,
                     {
                         language_id,
                         source_code,
@@ -97,16 +97,16 @@ const submitCode = asyncHandler(async (req, res) => {
         const questionScore = Math.round((passedCount / dbCases.length) * 100);
 
         // console.log(results);
-        
+
         // console.log(`IS BATTLE: ${isBattle}`);
-        
+
 
         // update scores
         if (isBattle) {
-             const [battleQ] = await db.execute('SELECT battle_id FROM battle_question WHERE battle_question_id = ?', [question_id]);
+            const [battleQ] = await db.execute('SELECT battle_id FROM battle_question WHERE battle_question_id = ?', [question_id]);
             const battle_id = battleQ[0].battle_id;
-           
-            
+
+
             await db.execute(`
                 INSERT INTO battle_submissions (battle_id, battle_question_id, user_id, code, language, score)
                 VALUES (?, ?, ?, ?, ?, ?)
@@ -115,7 +115,7 @@ const submitCode = asyncHandler(async (req, res) => {
                     language = VALUES(language),
                     score = GREATEST(score, VALUES(score)),
                     last_updated = NOW()
-            `, [battle_id, question_id, user_id, source_code, language_id,questionScore]);
+            `, [battle_id, question_id, user_id, source_code, language_id, questionScore]);
 
             const [sumRows] = await db.execute('SELECT SUM(score) as total_score FROM battle_submissions WHERE battle_id = ? AND user_id = ?', [battle_id, user_id]);
             const finalTotalScore = parseInt(sumRows[0].total_score) || 0;
@@ -127,7 +127,7 @@ const submitCode = asyncHandler(async (req, res) => {
                     query: `UPDATE battle_participant SET score = ? WHERE battle_id = ? AND user_id = ?`,
                     params: [finalTotalScore, battle_id, user_id]
                 },
-                key:battle_id
+                key: battle_id
             });
             return res.status(200).json({ results, score: questionScore, type: 'battle' });
 
@@ -147,7 +147,7 @@ const submitCode = asyncHandler(async (req, res) => {
 
             const [sumRows] = await db.execute('SELECT SUM(score) as total_score FROM test_submissions WHERE test_id = ? AND user_id = ?', [test_id, user_id]);
             const finalTotalScore = parseInt(sumRows[0].total_score) || 0;
-            console.log(`final total test score=${finalTotalScore}`,sumRows);
+            console.log(`final total test score=${finalTotalScore}`, sumRows);
             await produceEvent(Topics.TEST_TOPIC.name, {
                 type: Events.DB_QUERY.type,
                 payload: {
@@ -155,7 +155,7 @@ const submitCode = asyncHandler(async (req, res) => {
                     query: `UPDATE test_participant SET score = ? WHERE test_id = ? AND user_id = ?`,
                     params: [finalTotalScore, test_id, user_id]
                 },
-                key:test_id
+                key: test_id
             });
 
             return res.status(200).json({ results, score: finalTotalScore, type: 'test' });
