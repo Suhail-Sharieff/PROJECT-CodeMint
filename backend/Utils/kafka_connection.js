@@ -28,8 +28,8 @@ const kafka = new Kafka({
     brokers: brokers,
     // Retry Logic
     retry: {
-        initialRetryTime: 300,
-        retries: 3
+        initialRetryTime: 1000,
+        retries: 10
     },
 });
 
