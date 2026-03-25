@@ -91,8 +91,21 @@ services:
       - "6379:6379"      # Redis server
       - "8001:8001"      # Redis Insight UI
    
+  codemint_mysql_service:
+    image: mysql:8.0
+    container_name: codemint_sql
+    restart: always
+    ports:
+      - "3308:3306"  # host:container
+    environment:
+      MYSQL_ROOT_PASSWORD: "codemint@123"
+      MYSQL_DATABASE: "codemint"
+    volumes:
+      - codemint_docker_data:/var/lib/mysql
   
 
 volumes:
   data:
   grafana_data:
+  codemint_docker_data:
+    driver: local
