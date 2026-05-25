@@ -13,7 +13,7 @@ const createTest = async (user_id, test_id,duration=10,title) => {
         if (!test_id) throw new ApiError(400, `No test_id provided by SocketManager to create test!`)
 
         const query = 'insert into test (test_id,host_id,duration,title) values(?,?,?,?)'
-        const [rows] = await db.execute(query, [test_id,user_id,duration,title])
+        const [rows] = await db.execute(query, [test_id,user_id,duration,title || null])
         if (rows.length === 0) throw new ApiError(400, "Unabe to create test!")
 
 
@@ -208,13 +208,16 @@ async function setupTestEvents(socket,io) {
     });
     
     socket.on('create_test', async ({ duration, title }) => {
-        const test_id = uuidv4();
-        
-        const finalDuration = parseInt(duration) || 60;
-        await createTest(user_id, test_id, finalDuration, title);
-        await joinTest(user_id, test_id);
-
-        socket.emit('test_created', test_id);
+        try {
+            const test_id = uuidv4();
+            const finalDuration = parseInt(duration) || 60;
+            await createTest(user_id, test_id, finalDuration, title);
+            await joinTest(user_id, test_id);
+            socket.emit('test_created', test_id);
+        } catch (err) {
+            console.error("❌ Error in create_test event handler:", err.message);
+            socket.emit('error', { message: err.message });
+        }
     });
 
     socket.on('join_test', async ({ test_id }) => {

@@ -14,3 +14,10 @@ export const apiRequestDuration = new Histogram({
 //   buckets: [0.1, 0.5, 1, 2, 5]//in sec
 });
 
+// Active WebSocket Connections
+export const activeSocketConnections = new Gauge({
+  name: 'socket_connections_active',
+  help: 'Number of active WebSocket connections'
+});
+
+

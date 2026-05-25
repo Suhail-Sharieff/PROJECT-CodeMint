@@ -9,7 +9,7 @@ let db = createPool({
   password: process.env.DB_PASSWORD,
   connectionLimit: 20,
   waitForConnections:true,
-  queueLimit:1,
+  queueLimit:0,
   connectTimeout: 10000,
   multipleStatements: true, // because we execute multiple statements in init_queries
   port: process.env.DB_PORT,
@@ -105,7 +105,7 @@ const initDB = async (init_query) => {
       password: process.env.DB_PASSWORD,
       connectionLimit: 20,
       waitForConnections: true,
-      queueLimit: 1,
+      queueLimit: 0,
       connectTimeout: 10000,
       multipleStatements: true,
       port: process.env.DB_PORT,

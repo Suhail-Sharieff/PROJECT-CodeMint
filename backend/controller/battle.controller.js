@@ -126,7 +126,7 @@ const createbattle = async (user_id, battle_id, duration = 10, title) => {
         if (!battle_id) throw new ApiError(400, `No battle_id provided by SocketManager to create battle!`)
 
         const query = 'insert into battle (battle_id,host_id,duration,title,curr_round) values(?,?,?,?,?)'
-        const [rows] = await db.execute(query, [battle_id, user_id, duration, title, 0])
+        const [rows] = await db.execute(query, [battle_id, user_id, duration, title || null, 0])
         if (rows.length === 0) throw new ApiError(400, "Unabe to create battle!")
 
 
@@ -180,16 +180,17 @@ export const setupBattleEvents = async (io, socket) => {
     });
 
     socket.on('create_battle', async ({ duration, title }) => {
-        const battle_id = uuidv4();
-
-        console.log('battle creation');
-
-        const finalDuration = parseInt(duration) || 60;
-
-        await createbattle(user_id, battle_id, finalDuration, title);
-        await joinbattle(user_id, battle_id);
-
-        socket.emit('battle_created', battle_id);
+        try {
+            const battle_id = uuidv4();
+            console.log('battle creation');
+            const finalDuration = parseInt(duration) || 60;
+            await createbattle(user_id, battle_id, finalDuration, title);
+            await joinbattle(user_id, battle_id);
+            socket.emit('battle_created', battle_id);
+        } catch (err) {
+            console.error("❌ Error in create_battle event handler:", err.message);
+            socket.emit('error', { message: err.message });
+        }
     });
 
     socket.on('join_battle', async ({ battle_id }) => {

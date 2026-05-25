@@ -1,6 +1,7 @@
 
 import jwt from "jsonwebtoken";
 import { db } from "./Utils/sql_connection.js";
+import { activeSocketConnections } from "./Utils/custom_prometheus_metrics.util.js";
 
 
 
@@ -38,15 +39,21 @@ export function registerSocketEvents(io) {
              return;
         }
         console.log(`🔌 User connected: ${socket.user.name} (${socket.id})`);
+        activeSocketConnections.inc();
 
-        await setupSessionEvents(socket,io);
-        await db.execute('UPDATE user SET socket_id=? WHERE user_id=?', [socket.id, socket.user.user_id]);
-        await setupTestEvents(socket,io);
-        await setupBattleEvents(io,socket)
+        try {
+            await setupSessionEvents(socket,io);
+            await db.execute('UPDATE user SET socket_id=? WHERE user_id=?', [socket.id, socket.user.user_id]);
+            await setupTestEvents(socket,io);
+            await setupBattleEvents(io,socket);
+        } catch (err) {
+            console.error(`❌ Socket connection setup error for user ${socket.user.name}:`, err.message);
+        }
 
         socket.on('disconnect', async () => {
             if (!socket.user) return;
             console.log(`🔌 User disconnected: ${socket.user.name} (${socket.id})`);
+            activeSocketConnections.dec();
             // const { user_id } = socket.user;
 
         });
@@ -54,4 +61,5 @@ export function registerSocketEvents(io) {
     });
 
 }
+
 
