@@ -1,6 +1,7 @@
 import { ApiError } from "./Api_Error.utils.js";
 import { db } from "./sql_connection.js";
-import jwt from "jsonwebtoken"
+import jwt from "jsonwebtoken";
+import { redis } from "./redis_connection.utils.js";
 
 const generateAccessToken = (user)=>{
     if (!process.env.ACCESS_TOKEN_SECRET) {
@@ -42,10 +43,23 @@ const generateRefreshToken = (user)=>{
     )
 }
 const getUserById = async (user_id) => {
+    const redisKey = `user:profile:${user_id}`;
+    
+    // Check Redis first
+    const cachedUser = await redis.get(redisKey);
+    if (cachedUser) {
+        return JSON.parse(cachedUser);
+    }
+
     const query = 'select * from user where user_id=? limit 1'
     const [result] = await db.execute(query, [user_id])
-    if (!result) throw ApiError(400, "Failed to fetch user detailss!")
-    return result[0];
+    if (!result || result.length === 0) throw new ApiError(400, "Failed to fetch user details!");
+    
+    const user = result[0];
+    // Cache profile for 1 hour (3600 seconds)
+    await redis.setEx(redisKey, 3600, JSON.stringify(user));
+    
+    return user;
 }
 /**Access Token: This is a short-lived token that allows a user or application to access protected resources (like an API). Once it expires, the user needs a new one.
 

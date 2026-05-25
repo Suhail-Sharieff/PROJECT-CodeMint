@@ -6,6 +6,7 @@ import dotenv from "dotenv";
 import { Server } from "socket.io";
 import { connectKafka } from "./Utils/kafka_connection.js";
 import { init_redis } from "./Utils/redis_connection.utils.js";
+import { createIndexes } from "./Utils/db_indexing.js";
 
 dotenv.config();
 
@@ -52,6 +53,7 @@ const startServer = async () => {
     validateEnv();
     await connect_To_DB();
     await initDB(init_query);
+    await createIndexes();
     await connectKafka();
     await init_redis();
     const { createWorker } = await import("./Utils/mediasoup.js");

@@ -117,11 +117,23 @@ export default function () {
       }
       // Handle Socket.IO connection acknowledgment
       else if (data.startsWith('40')) {
-        // 2. Emit 'create_battle' Socket.IO event frame
-        socket.send('42["create_battle",{"mode":"load-test"}]');
-
-        // 3. Emit a few mock collaborative keystroke code changes
-        socket.send('42["code_change",{"code":"function test() { console.log(\\"editing...\\"); }","language":"javascript"}]');
+        // 2. Emit 'create_session' Socket.IO event frame
+        socket.send('42["create_session"]');
+      }
+      // Handle session created event
+      else if (data.startsWith('42["session_created"')) {
+        try {
+          const parsed = JSON.parse(data.slice(2));
+          const sessionId = parsed[1];
+          // 3. Emit join_session Socket.IO event frame
+          socket.send(`42["join_session",{"session_id":"${sessionId}"}]`);
+          // 4. Emit joinee_code_change to trigger Kafka event!
+          socket.send(`42["joinee_code_change",{"session_id":"${sessionId}","code":"function test() { console.log(\\"editing via Kafka...\\"); }"}]`);
+          // 5. Emit send_message to trigger another Kafka event!
+          socket.send(`42["send_message",{"session_id":"${sessionId}","message":"Hello from k6 load test via Kafka"}]`);
+        } catch (e) {
+          // Ignore parse errors
+        }
       }
     });
 
