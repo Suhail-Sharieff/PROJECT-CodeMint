@@ -7,6 +7,7 @@ import { ApiResponse } from "../Utils/Api_Response.utils.js";
 import { getWorker, mediasoupConfig } from "../Utils/mediasoup.js";
 import { produceEvent } from "../Utils/kafka_connection.js";
 import { Events, Topics } from "../Utils/kafka_events.js";
+import { redis } from "../Utils/redis_connection.utils.js";
 
 const roomState = new Map();
 
@@ -163,6 +164,9 @@ const joinbattle =
 
 export const setupBattleEvents = async (io, socket) => {
     const { user_id, name } = socket.user;
+    if (!socket.battleDebounceTimers) {
+        socket.battleDebounceTimers = new Map();
+    }
     socket.on('kick_battle_user', async ({ battle_id, user_id_to_kick }) => {
         const { user_id } = socket.user;
         // to ensure only host can kick participnts
@@ -251,8 +255,19 @@ export const setupBattleEvents = async (io, socket) => {
                 const [allCodes] = await db.execute('SELECT user_id, battle_question_id, code, language FROM battle_submissions WHERE battle_id=?', [battle_id]);
                 savedCode = allCodes;
             } else {
-                const [myCodes] = await db.execute('SELECT battle_question_id, code, language FROM battle_submissions WHERE battle_id=? AND user_id=?', [battle_id, user_id]);
-                savedCode = myCodes;
+                const cached = await redis.hGetAll(`battle:codes:${battle_id}:${user_id}`);
+                if (cached && Object.keys(cached).length > 0) {
+                    savedCode = Object.entries(cached).map(([qId, val]) => {
+                        const parsed = JSON.parse(val);
+                        return { user_id, battle_question_id: parseInt(qId), code: parsed.code, language: parsed.language };
+                    });
+                } else {
+                    const [myCodes] = await db.execute('SELECT battle_question_id, code, language FROM battle_submissions WHERE battle_id=? AND user_id=?', [battle_id, user_id]);
+                    savedCode = myCodes;
+                    for (const row of myCodes) {
+                        await redis.hSet(`battle:codes:${battle_id}:${user_id}`, String(row.battle_question_id), JSON.stringify({ code: row.code, language: row.language }));
+                    }
+                }
             }
 
             //for leader board, we show all users to all both host and joinees
@@ -338,6 +353,15 @@ export const setupBattleEvents = async (io, socket) => {
     });
 
     socket.on('submit_battle', async ({ battle_id }) => {
+        if (socket.battleDebounceTimers) {
+            for (const [timerKey, timerData] of socket.battleDebounceTimers.entries()) {
+                if (timerKey.startsWith(`${battle_id}:`)) {
+                    clearTimeout(timerData.timer);
+                    await timerData.flush();
+                    socket.battleDebounceTimers.delete(timerKey);
+                }
+            }
+        }
         await db.execute('UPDATE battle_participant SET status="finished" WHERE battle_id=? AND user_id=?', [battle_id, user_id]);
         socket.emit('battle_submitted');
         socket.to(battle_id).emit('participant_finished', { userId: user_id });
@@ -345,28 +369,45 @@ export const setupBattleEvents = async (io, socket) => {
     });
 
     socket.on('save_battle_code', async (data) => {
+        const { battle_id, battle_question_id, code, language } = data;
+        const codeToSave = code !== undefined ? code : '';
 
-        const { battle_id, battle_question_id, code, language } = data
-        // console.log(data);
-        const query=`INSERT INTO battle_submissions (battle_id, battle_question_id, user_id, code, language)
-             VALUES (?, ?, ?, ?, ?)
-             ON DUPLICATE KEY UPDATE code=?, language=?, last_updated=NOW()`
-        const params=[battle_id, battle_question_id, user_id, code, language, code, language]
-        await produceEvent(Topics.BATTLE_TOPIC.name,{
-            type:Events.DB_QUERY.type,
-            payload:{
-                desc: `saving battle code of battle_id=${battle_id} for user_id=${user_id}`,
-                query:query,
-                params:params
-            }
-        })
+        const redisKey = `battle:codes:${battle_id}:${user_id}`;
+        await redis.hSet(redisKey, String(battle_question_id), JSON.stringify({ code: codeToSave, language }));
 
         socket.to(battle_id).emit('battle_participant_code_update', {
             userId: user_id,
             questionId: battle_question_id,
-            code,
+            code: codeToSave,
             language
         });
+
+        const timerKey = `${battle_id}:${battle_question_id}:${user_id}`;
+        if (socket.battleDebounceTimers.has(timerKey)) {
+            clearTimeout(socket.battleDebounceTimers.get(timerKey).timer);
+        }
+
+        const flush = async () => {
+            const query = `INSERT INTO battle_submissions (battle_id, battle_question_id, user_id, code, language)
+                 VALUES (?, ?, ?, ?, ?)
+                 ON DUPLICATE KEY UPDATE code=?, language=?, last_updated=NOW()`;
+            const params = [battle_id, battle_question_id, user_id, codeToSave, language, codeToSave, language];
+            await produceEvent(Topics.BATTLE_TOPIC.name, {
+                type: Events.DB_QUERY.type,
+                payload: {
+                    desc: `saving battle code (debounced) of battle_id=${battle_id} for user_id=${user_id}`,
+                    query: query,
+                    params: params
+                }
+            });
+        };
+
+        const timer = setTimeout(async () => {
+            socket.battleDebounceTimers.delete(timerKey);
+            await flush();
+        }, 5000);
+
+        socket.battleDebounceTimers.set(timerKey, { timer, flush });
     });
 
     socket.on('battle_score_update', async ({ battle_id, battle_question_id, score }) => {
@@ -601,7 +642,14 @@ export const setupBattleEvents = async (io, socket) => {
         if (socket.current_battle_id) cleanupSocketVoice(socket.id, socket.current_battle_id);
     });
 
-    socket.on('disconnect', () => {
+    socket.on('disconnect', async () => {
+        if (socket.battleDebounceTimers) {
+            for (const [timerKey, timerData] of socket.battleDebounceTimers.entries()) {
+                clearTimeout(timerData.timer);
+                await timerData.flush();
+            }
+            socket.battleDebounceTimers.clear();
+        }
         if (socket.current_battle_id) cleanupSocketVoice(socket.id, socket.current_battle_id);
     });
 }

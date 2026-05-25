@@ -6,6 +6,7 @@ import { v4 as uuidv4 } from "uuid";
 import { Server,Socket } from "socket.io"
 import { produceEvent } from "../Utils/kafka_connection.js";
 import { Events, Topics } from "../Utils/kafka_events.js";
+import { redis } from "../Utils/redis_connection.utils.js";
 
 const createTest = async (user_id, test_id,duration=10,title) => {
     try {
@@ -191,6 +192,9 @@ const getTestHostID=asyncHandler(
 
 async function setupTestEvents(socket,io) {
     const { user_id, name } = socket.user;
+    if (!socket.testDebounceTimers) {
+        socket.testDebounceTimers = new Map();
+    }
     socket.on('kick_test_user', async ({ test_id, user_id_to_kick }) => {
         const { user_id } = socket.user;
         
@@ -287,8 +291,19 @@ async function setupTestEvents(socket,io) {
                 const [allCodes] = await db.execute('SELECT user_id, question_id, code, language FROM test_submissions WHERE test_id=?', [test_id]);
                 savedCode = allCodes;
             } else {
-                const [myCodes] = await db.execute('SELECT question_id, code, language FROM test_submissions WHERE test_id=? AND user_id=?', [test_id, user_id]);
-                savedCode = myCodes;
+                const cached = await redis.hGetAll(`test:codes:${test_id}:${user_id}`);
+                if (cached && Object.keys(cached).length > 0) {
+                    savedCode = Object.entries(cached).map(([qId, val]) => {
+                        const parsed = JSON.parse(val);
+                        return { user_id, question_id: parseInt(qId), code: parsed.code, language: parsed.language };
+                    });
+                } else {
+                    const [myCodes] = await db.execute('SELECT question_id, code, language FROM test_submissions WHERE test_id=? AND user_id=?', [test_id, user_id]);
+                    savedCode = myCodes;
+                    for (const row of myCodes) {
+                        await redis.hSet(`test:codes:${test_id}:${user_id}`, String(row.question_id), JSON.stringify({ code: row.code, language: row.language }));
+                    }
+                }
             }
 
             
@@ -385,6 +400,15 @@ async function setupTestEvents(socket,io) {
     });
 
     socket.on('submit_test', async ({ test_id }) => {
+        if (socket.testDebounceTimers) {
+            for (const [timerKey, timerData] of socket.testDebounceTimers.entries()) {
+                if (timerKey.startsWith(`${test_id}:`)) {
+                    clearTimeout(timerData.timer);
+                    await timerData.flush();
+                    socket.testDebounceTimers.delete(timerKey);
+                }
+            }
+        }
         await db.execute('UPDATE test_participant SET status="finished" WHERE test_id=? AND user_id=?', [test_id, user_id]);
         socket.emit('test_submitted');
         socket.to(test_id).emit('participant_finished', { userId: user_id });
@@ -392,31 +416,45 @@ async function setupTestEvents(socket,io) {
     });
     
     socket.on('save_code', async ({ test_id, question_id, code, language }) => {
-        
-        const query=`
-        INSERT INTO test_submissions (test_id, question_id, user_id, code, language)
-        VALUES (?, ?, ?, ?, ?)
-        ON DUPLICATE KEY UPDATE code=?, language=?, last_updated=NOW()
-    `
-        // await db.execute(query, [test_id, question_id, user_id, code, language, code, language]);
-        await produceEvent(Topics.TEST_TOPIC.name,{
-            type:Events.DB_QUERY.type,
-            payload:{
-                desc:`saving code of user_id=${user_id} in test_id=${test_id} for question_id=${question_id}`,
-                query:query,
-                params:[test_id, question_id, user_id, code, language, code, language]
-            },
-            key:test_id
-        });
+        const codeToSave = code !== undefined ? code : '';
+        const redisKey = `test:codes:${test_id}:${user_id}`;
+        await redis.hSet(redisKey, String(question_id), JSON.stringify({ code: codeToSave, language }));
 
-        
-        
         socket.to(test_id).emit('participant_code_update', {
             userId: user_id,
             questionId: question_id,
-            code,
+            code: codeToSave,
             language
         });
+
+        const timerKey = `${test_id}:${question_id}:${user_id}`;
+        if (socket.testDebounceTimers.has(timerKey)) {
+            clearTimeout(socket.testDebounceTimers.get(timerKey).timer);
+        }
+
+        const flush = async () => {
+            const query = `
+                INSERT INTO test_submissions (test_id, question_id, user_id, code, language)
+                VALUES (?, ?, ?, ?, ?)
+                ON DUPLICATE KEY UPDATE code=?, language=?, last_updated=NOW()
+            `;
+            await produceEvent(Topics.TEST_TOPIC.name, {
+                type: Events.DB_QUERY.type,
+                payload: {
+                    desc: `saving code (debounced) of user_id=${user_id} in test_id=${test_id} for question_id=${question_id}`,
+                    query: query,
+                    params: [test_id, question_id, user_id, codeToSave, language, codeToSave, language]
+                },
+                key: test_id
+            });
+        };
+
+        const timer = setTimeout(async () => {
+            socket.testDebounceTimers.delete(timerKey);
+            await flush();
+        }, 5000);
+
+        socket.testDebounceTimers.set(timerKey, { timer, flush });
     });
 
     
@@ -426,6 +464,16 @@ async function setupTestEvents(socket,io) {
             userId: socket.user.user_id,
             score: score
         });
+    });
+
+    socket.on('disconnect', async () => {
+        if (socket.testDebounceTimers) {
+            for (const [timerKey, timerData] of socket.testDebounceTimers.entries()) {
+                clearTimeout(timerData.timer);
+                await timerData.flush();
+            }
+            socket.testDebounceTimers.clear();
+        }
     });
 }
 
