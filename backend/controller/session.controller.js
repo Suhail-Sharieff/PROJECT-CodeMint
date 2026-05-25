@@ -3,6 +3,7 @@ import { ApiError } from "../Utils/Api_Error.utils.js"
 import { ApiResponse } from "../Utils/Api_Response.utils.js"
 import { db } from "../Utils/sql_connection.js"
 import { getWorker, mediasoupConfig } from '../Utils/mediasoup.js';
+import { redis } from "../Utils/redis_connection.utils.js";
 
 const sessionRoomState = new Map();
 
@@ -90,6 +91,10 @@ import { Events, Topics } from "../Utils/kafka_events.js"
 async function setupSessionEvents(socket, io) {
     const { user_id, name } = socket.user;
 
+    if (!socket.sessionDebounceTimers) {
+        socket.sessionDebounceTimers = new Map();
+    }
+
     socket.on('create_session', async () => {
         const sessionId = uuidv4();
 
@@ -129,22 +134,48 @@ async function setupSessionEvents(socket, io) {
         const [sessionData] = await db.execute('SELECT host_id FROM session WHERE session_id = ?', [session_id]);
         const role = (sessionData[0] && sessionData[0].host_id === user_id) ? 'host' : 'joinee';
 
+        const redisHostKey = `session:code:${session_id}:${sessionData[0].host_id}`;
+        const redisMyKey = `session:code:${session_id}:${user_id}`;
+
+        let hostCode = null;
+        let hostLang = 'javascript';
+        let myCode = null;
+
+        const hostCached = await redis.get(redisHostKey);
+        if (hostCached) {
+            const parsed = JSON.parse(hostCached);
+            hostCode = parsed.code;
+            hostLang = parsed.language;
+        } else {
+            const [hostCodeRows] = await db.execute(
+                'SELECT code, code_lang FROM session_codes WHERE session_id=? AND user_id=(SELECT host_id FROM session WHERE session_id=?)',
+                [session_id, session_id]
+            );
+            if (hostCodeRows[0]) {
+                hostCode = hostCodeRows[0].code;
+                hostLang = hostCodeRows[0].code_lang;
+                await redis.set(redisHostKey, JSON.stringify({ code: hostCode, language: hostLang }));
+            }
+        }
+
+        const myCached = await redis.get(redisMyKey);
+        if (myCached) {
+            myCode = JSON.parse(myCached).code;
+        } else {
+            const [myCodeRows] = await db.execute(
+                'SELECT code FROM session_codes WHERE session_id=? AND user_id=?',
+                [session_id, user_id]
+            );
+            if (myCodeRows[0]) {
+                myCode = myCodeRows[0].code;
+                await redis.set(redisMyKey, JSON.stringify({ code: myCode, language: 'javascript' }));
+            }
+        }
+
 
         await joinSession(user_id, session_id, role);
 
 
-
-
-        const [hostCodeRows] = await db.execute(
-            'SELECT code, code_lang FROM session_codes WHERE session_id=? AND user_id=(SELECT host_id FROM session WHERE session_id=?)',
-            [session_id, session_id]
-        );
-
-
-        const [myCodeRows] = await db.execute(
-            'SELECT code FROM session_codes WHERE session_id=? AND user_id=?',
-            [session_id, user_id]
-        );
 
 
         const [users] = await db.execute(`
@@ -161,12 +192,12 @@ async function setupSessionEvents(socket, io) {
 
 
         socket.emit('session_state', {
-            code: hostCodeRows[0]?.code || '// Host has not started yet...', // Host's code
-            language: hostCodeRows[0]?.code_lang || 'javascript',
+            code: hostCode || '// Host has not started yet...', // Host's code
+            language: hostLang,
             users: users,
             chat: chat,
 
-            userCode: myCodeRows[0]?.code || '// Write your solution here...' // [NEW FIELD]
+            userCode: myCode || '// Write your solution here...' // [NEW FIELD]
         });
 
 
@@ -175,26 +206,48 @@ async function setupSessionEvents(socket, io) {
 
 
     socket.on('host_code_change', async ({ session_id, new_code }) => {
-
-        const query = 'UPDATE session_codes SET code=? WHERE session_id=? AND user_id=?'
-
-        await produceEvent(Topics.SESSION_TOPIC.name, {
-            type: Events.DB_QUERY.type,
-            payload: {
-                desc: `host_code_change in session_id=${session_id} user_id=${user_id}`,
-                query: query,
-                params: [new_code, session_id, user_id]
-            },
-            key:session_id
-        })
+        const redisKey = `session:code:${session_id}:${user_id}`;
+        await redis.set(redisKey, JSON.stringify({ code: new_code, language: 'javascript' }));
 
         socket.to(session_id).emit('host_code_update', new_code);
+
+        const timerKey = `${session_id}:${user_id}`;
+        if (socket.sessionDebounceTimers.has(timerKey)) {
+            clearTimeout(socket.sessionDebounceTimers.get(timerKey).timer);
+        }
+
+        const flush = async () => {
+            const query = 'UPDATE session_codes SET code=? WHERE session_id=? AND user_id=?';
+            await produceEvent(Topics.SESSION_TOPIC.name, {
+                type: Events.DB_QUERY.type,
+                payload: {
+                    desc: `host_code_change (debounced) in session_id=${session_id} user_id=${user_id}`,
+                    query: query,
+                    params: [new_code, session_id, user_id]
+                },
+                key: session_id
+            });
+        };
+
+        const timer = setTimeout(async () => {
+            socket.sessionDebounceTimers.delete(timerKey);
+            await flush();
+        }, 5000);
+
+        socket.sessionDebounceTimers.set(timerKey, { timer, flush });
     });
 
 
     socket.on('host_language_change', async ({ session_id, language }) => {
-        const query = 'UPDATE session_codes SET code_lang=? WHERE session_id=? AND user_id=?'
-        // await db.execute(query, [language, session_id, user_id]);
+        const redisKey = `session:code:${session_id}:${user_id}`;
+        const cached = await redis.get(redisKey);
+        let currentCode = '// Session Started';
+        if (cached) {
+            currentCode = JSON.parse(cached).code;
+        }
+        await redis.set(redisKey, JSON.stringify({ code: currentCode, language }));
+
+        const query = 'UPDATE session_codes SET code_lang=? WHERE session_id=? AND user_id=?';
         await produceEvent(Topics.SESSION_TOPIC.name, {
             type: Events.DB_QUERY.type,
             payload: {
@@ -202,38 +255,50 @@ async function setupSessionEvents(socket, io) {
                 query: query,
                 params: [language, session_id, user_id]
             },
-            key:session_id
-        })
+            key: session_id
+        });
         socket.to(session_id).emit('language_change', language);
     });
 
 
     socket.on('joinee_code_change', async ({ session_id, code }) => {
-
-
-        const [existing] = await db.execute('SELECT * FROM session_codes WHERE session_id=? AND user_id=?', [session_id, user_id]);
-        let query;
-        let params;
-        if (existing.length > 0) {
-            query = 'UPDATE session_codes SET code=? WHERE session_id=? AND user_id=?'
-            params = [code, session_id, user_id]
-        } else {
-            query = 'INSERT INTO session_codes(session_id, user_id, code, code_lang) VALUES(?,?,?,?)'
-            params = [session_id, user_id, code, 'javascript']
-        }
-        // await db.execute(query,params );
-        await produceEvent(Topics.SESSION_TOPIC.name, {
-            type: Events.DB_QUERY.type,
-            payload: {
-                desc: `joinee_code_change in session_id=${session_id} user_id=${user_id}`,
-                query: query,
-                params: params
-            },
-            key:session_id
-        })
-
+        const redisKey = `session:code:${session_id}:${user_id}`;
+        await redis.set(redisKey, JSON.stringify({ code, language: 'javascript' }));
 
         socket.to(session_id).emit('joinee_code_update', { joineeId: user_id, code: code });
+
+        const timerKey = `${session_id}:${user_id}`;
+        if (socket.sessionDebounceTimers.has(timerKey)) {
+            clearTimeout(socket.sessionDebounceTimers.get(timerKey).timer);
+        }
+
+        const flush = async () => {
+            const [existing] = await db.execute('SELECT * FROM session_codes WHERE session_id=? AND user_id=?', [session_id, user_id]);
+            let query, params;
+            if (existing.length > 0) {
+                query = 'UPDATE session_codes SET code=? WHERE session_id=? AND user_id=?';
+                params = [code, session_id, user_id];
+            } else {
+                query = 'INSERT INTO session_codes(session_id, user_id, code, code_lang) VALUES(?,?,?,?)';
+                params = [session_id, user_id, code, 'javascript'];
+            }
+            await produceEvent(Topics.SESSION_TOPIC.name, {
+                type: Events.DB_QUERY.type,
+                payload: {
+                    desc: `joinee_code_change (debounced) in session_id=${session_id} user_id=${user_id}`,
+                    query: query,
+                    params: params
+                },
+                key: session_id
+            });
+        };
+
+        const timer = setTimeout(async () => {
+            socket.sessionDebounceTimers.delete(timerKey);
+            await flush();
+        }, 5000);
+
+        socket.sessionDebounceTimers.set(timerKey, { timer, flush });
     });
 
 
@@ -255,6 +320,13 @@ async function setupSessionEvents(socket, io) {
 
 
     socket.on('end_session', async ({ session_id }) => {
+        const timerKey = `${session_id}:${user_id}`;
+        if (socket.sessionDebounceTimers && socket.sessionDebounceTimers.has(timerKey)) {
+            const timerData = socket.sessionDebounceTimers.get(timerKey);
+            clearTimeout(timerData.timer);
+            await timerData.flush();
+            socket.sessionDebounceTimers.delete(timerKey);
+        }
 
         await db.execute('UPDATE session SET is_ended=true WHERE session_id=?', [session_id]);
 
@@ -512,7 +584,14 @@ async function setupSessionEvents(socket, io) {
         if (socket.current_session_id) cleanupSessionVoice(socket.id, socket.current_session_id);
     });
 
-    socket.on('disconnect', () => {
+    socket.on('disconnect', async () => {
+        if (socket.sessionDebounceTimers) {
+            for (const [timerKey, timerData] of socket.sessionDebounceTimers.entries()) {
+                clearTimeout(timerData.timer);
+                await timerData.flush();
+            }
+            socket.sessionDebounceTimers.clear();
+        }
         if (socket.current_session_id) cleanupSessionVoice(socket.id, socket.current_session_id);
     });
 
