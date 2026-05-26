@@ -45,7 +45,7 @@ sequenceDiagram
 * When the server acknowledges a sent operation, the client sends its buffered operations next.
 
 #### 2. Server-Side Changes (`backend`)
-* **Document History Tracking**: In [session.controller.js](file:///c:/Users/suhai/Desktop/PROJECT-CodeMint/backend/controller/session.controller.js), maintain a history log of operations and the current revision number in Redis for every active session.
+* **Document History Tracking**: In [session.controller.js](.backend/controller/session.controller.js), maintain a history log of operations and the current revision number in Redis for every active session.
 * **Transformation Logic**:
   When the server receives an operation `op` at base revision `clientRev`:
   1. If `clientRev === serverRev` (no concurrent edits), apply `op` to the document in Redis, increment `serverRev`, and broadcast `op` to other participants.
@@ -55,12 +55,44 @@ sequenceDiagram
 * The periodic Kafka database updates will write the current consolidated text string from the Redis state to MySQL, keeping the database writes decoupled from the WebSocket operational throughput.
 
 ---
+- BUt , implementing OT can be very hard since it involves advanced math and multiple edge cases
+- So, I hv opted for `CRDT (Conflict-free Replicated Data Type)` via Yjs,  where edits are broadcast as lightweight conflict-free operational changes (CRDT updates) applied directly to Monaco Editor's document model, keeping cursors and selections fully intact
+- Socket.IO Event Migration: Custom full-text event synchronization (host_code_change, joinee_code_change, host_code_update, etc.) will be replaced with binary yjs-sync-step-1, yjs-sync-step-2, and yjs-update event structures.
+State Preservation: The document state will be cached in Redis as a binary snapshot of the Yjs document. The debounced write-back caching to MySQL via Kafka remains intact by extracting the raw string from the Yjs document on the server before writing.
+## Proposed Changes
 
-### 💡 Highly Recommended Alternative: CRDTs via Yjs
-While OT is powerful, writing transformation math manually is complex and prone to edge-case bugs. A modern, cleaner alternative is **Yjs**, a high-performance **CRDT (Conflict-free Replicated Data Type)** library.
+### 1. Backend
 
-Implementing Yjs in Codemint is significantly easier:
-1. **Client-side**:
-   Use `@monaco-editor/react` (or your raw editor) paired with `yjs` and `y-monaco` bindings. Yjs handles cursor positions and text insertions automatically.
-2. **Server-side**:
-   Run a `y-websocket` server provider. You can integrate this directly into [socket_events.js](file:///c:/Users/suhai/Desktop/PROJECT-CodeMint/backend/socket_events.js). Instead of custom event listeners, Socket.IO wraps Yjs binary state updates, and Yjs takes care of syncing and resolving conflicts out of the box.
+#### [MODIFY] [package.json](.backend/package.json)
+- Add `yjs` dependency.
+
+#### [MODIFY] [session.controller.js](.backend/controller/session.controller.js)
+- Import `yjs` (as `* as Y`).
+- Implement helper class `SessionYDocManager` to manage in-memory `Y.Doc` instances for active sessions:
+  - Load binary snapshot from Redis when a session starts.
+  - Listen to document updates and schedule debounced writes of the plain text to MySQL via Kafka.
+  - Save binary snapshots to Redis.
+- Replace custom `host_code_change` and `joinee_code_change` socket event handlers with:
+  - `yjs-sync-step-1`: Receives client state vector, replies with step-2 updates, and requests missing client updates.
+  - `yjs-update`: Receives binary increments and applies them to the server-side `Y.Doc`.
+- Ensure cleanups on disconnect flush the final document text.
+
+---
+
+### 2. Frontend (UI)
+
+#### [MODIFY] [package.json](.ui/package.json)
+- Add `yjs` and `y-monaco` dependencies.
+
+#### [MODIFY] [CodeEditor.jsx](.ui/src/pages/CodeEditor.jsx)
+- Import `yjs` and `MonacoBinding` from `y-monaco`.
+- Support optional `yDocText` or `yDoc` and `socket` props:
+  - If collaborative editing is enabled, bind Monaco editor model to the Yjs `Y.Text` object using `MonacoBinding`.
+  - Disable standard controlled-value updates to prevent buffer replacement when Yjs is active.
+
+#### [MODIFY] [HostView.jsx](./ui/src/pages/HostView.jsx) and [JoineeView.jsx](./ui/src/pages/JoineeView.jsx)
+- Initialize/maintain a local Yjs document (`Y.Doc`) synced over the socket.
+- Pass the Yjs document state to `CodeEditor` to enable collaborative editing.
+
+---
+
