@@ -31,6 +31,5 @@
 | Iterations | 1006 | 1004 | ✅ Equivalent |
 | Auth Success Rate | 99.4% | 99.6% | ✅ Excellent |
 | WebSocket Reliability | Excellent | Excellent | ✅ Stable |
-- They System perfoms efficiently upto 500 concurrent users per session/battle/tests
-## Most probably i would be stopping to work further on this project, Im always open to Open source contributions
-## ---------------THANK YOU-------------------
+
+- ``Verdict` : The System perfoms efficiently upto 500 concurrent users per session/battle/tests
