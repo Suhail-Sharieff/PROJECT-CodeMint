@@ -25,15 +25,15 @@ To replace the full-buffer updates with an OT-based collaboration flow, you need
 
 ```mermaid
 sequenceDiagram
-    participant Client A (Monaco)
-    participant Server (Socket.IO + Redis)
-    participant Client B (Monaco)
+    participant A as Client A - Monaco
+    participant S as Server - Socket.IO / Redis
+    participant B as Client B - Monaco
 
-    Client A (Monaco)->>Server (Socket.IO + Redis): Send Op(Insert "x" at 0, baseRev: 5)
-    Note over Server (Socket.IO + Redis): Transform Op against concurrent edits
-    Server (Socket.IO + Redis)-->>Client A (Monaco): Acknowledge Op (newRev: 6)
-    Server (Socket.IO + Redis)->>Client B (Monaco): Broadcast Transformed Op(Insert "x" at 0)
-    Note over Client B (Monaco): Apply Op locally using Monaco Editor Model API
+    A->>S: Send Op(Insert "x" at 0, baseRev: 5)
+    Note over S: Transform Op against concurrent edits
+    S-->>A: Acknowledge Op (newRev: 6)
+    S->>B: Broadcast Transformed Op(Insert "x" at 0)
+    Note over B: Apply Op locally using Monaco Editor Model API
 ```
 
 #### 1. Client-Side Changes (UI)
