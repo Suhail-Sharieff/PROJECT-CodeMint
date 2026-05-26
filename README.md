@@ -19,9 +19,8 @@ If the server receives `opA` first, it transforms `opB` to account for `opA`'s i
 
 ---
 
-### Implementation Plan: Changes Needed in Codemint
+### Implementation of Changes
 
-To replace the full-buffer updates with an OT-based collaboration flow, you need to make the following changes:
 
 ```mermaid
 sequenceDiagram
