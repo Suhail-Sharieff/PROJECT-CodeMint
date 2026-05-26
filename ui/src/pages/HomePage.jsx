@@ -52,6 +52,14 @@ const HomePage = () => {
 
   // --- HANDLERS ---
 
+  const sanitizeId = (id) => {
+    let cleaned = id.trim();
+    if (cleaned.toLowerCase().startsWith('id:')) {
+      cleaned = cleaned.substring(3).trim();
+    }
+    return cleaned;
+  };
+
   // 1. Session Handlers
   const handleCreateSession = () => {
     if (!socket) {
@@ -63,15 +71,16 @@ const HomePage = () => {
 
   const handleJoinSession = async(e) => {
     e.preventDefault();
-    if (joinSessionId.trim()) {
+    const cleanId = sanitizeId(joinSessionId);
+    if (cleanId) {
       try {
-        const res = await api.get(`/session/getHostIdOf/${joinSessionId.trim()}`);
+        const res = await api.get(`/session/getHostIdOf/${cleanId}`);
         const host_id = res.data.data;
         
         if (host_id !== user.user_id) {
-          navigate(`/joinView/${joinSessionId.trim()}`);
+          navigate(`/joinView/${cleanId}`);
         } else {
-          navigate(`/hostView/${joinSessionId.trim()}`);
+          navigate(`/hostView/${cleanId}`);
         }
       } catch (err) {
         console.error('Error joining session:', err);
@@ -98,15 +107,16 @@ const HomePage = () => {
 
   const handleJoinTest = async(e) => {
     e.preventDefault();
-    if (joinTestId.trim()) {
+    const cleanId = sanitizeId(joinTestId);
+    if (cleanId) {
       try {
-        const res = await api.get(`/test/getTestHostID/${joinTestId.trim()}`);
+        const res = await api.get(`/test/getTestHostID/${cleanId}`);
         const host_id = res.data; // Note: Check if backend returns .data or .data.data consistently
         
         if (host_id !== user.user_id) {
-          navigate(`/joineeTestView/${joinTestId.trim()}`);
+          navigate(`/joineeTestView/${cleanId}`);
         } else {
-          navigate(`/hostTestView/${joinTestId.trim()}`);
+          navigate(`/hostTestView/${cleanId}`);
         }
       } catch (err) {
         console.error('Error joining test:', err);
@@ -132,17 +142,18 @@ const HomePage = () => {
 
   const handleJoinBattle = async(e) => {
     e.preventDefault();
-    if (!joinBattleId.trim()) return;
+    const cleanId = sanitizeId(joinBattleId);
+    if (!cleanId) return;
     
     try {
-        const res = await api.get(`/battle/getBattleHostID/${joinBattleId.trim()}`);
+        const res = await api.get(`/battle/getBattleHostID/${cleanId}`);
         const host_id = res.data.data || res.data; 
         
-        navigate(host_id !== user.user_id ? `/joineeBattleView/${joinBattleId}` : `/hostBattleView/${joinBattleId}`);
+        navigate(host_id !== user.user_id ? `/joineeBattleView/${cleanId}` : `/hostBattleView/${cleanId}`);
     } catch (err) {
         console.error("Join battle error", err);
         // Fallback or optimistic join if API fails/doesn't exist yet
-        navigate(`/joineeBattleView/${joinBattleId}`);
+        navigate(`/joineeBattleView/${cleanId}`);
     }
   };
 

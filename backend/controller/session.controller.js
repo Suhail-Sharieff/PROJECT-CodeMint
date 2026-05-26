@@ -4,6 +4,200 @@ import { ApiResponse } from "../Utils/Api_Response.utils.js"
 import { db } from "../Utils/sql_connection.js"
 import { getWorker, mediasoupConfig } from '../Utils/mediasoup.js';
 import { redis } from "../Utils/redis_connection.utils.js";
+import redisPkg from 'redis';
+const { RESP_TYPES } = redisPkg;
+import * as Y from 'yjs';
+
+const activeYDocs = new Map(); // docId => { ydoc, lastText, redisTimer, dbTimer }
+
+const getOrCreateYDoc = async (docId, session_id) => {
+    if (activeYDocs.has(docId)) {
+        return activeYDocs.get(docId).ydoc;
+    }
+
+    const ydoc = new Y.Doc();
+    const redisKey = `session:ydoc:${docId}`;
+    
+    try {
+        const binaryRedis = redis.withTypeMapping({
+            [RESP_TYPES.BLOB_STRING]: Buffer
+        });
+        const cached = await binaryRedis.get(redisKey);
+        if (cached) {
+            Y.applyUpdate(ydoc, new Uint8Array(cached));
+        } else {
+            let initialText = '';
+            if (docId.startsWith('host:')) {
+                const hostId = docId.split(':')[2];
+                const [rows] = await db.execute('SELECT code FROM session_codes WHERE session_id=? AND user_id=?', [session_id, hostId]);
+                if (rows[0]) initialText = rows[0].code;
+            } else {
+                const joineeId = docId.split(':')[2];
+                const [rows] = await db.execute('SELECT code FROM session_codes WHERE session_id=? AND user_id=?', [session_id, joineeId]);
+                if (rows[0]) initialText = rows[0].code;
+            }
+            
+            if (initialText) {
+                ydoc.getText('code').insert(0, initialText);
+            }
+        }
+    } catch (err) {
+        console.error(`Error initializing YDoc for ${docId}:`, err);
+    }
+
+    const entry = { ydoc, lastText: ydoc.getText('code').toString(), redisTimer: null, dbTimer: null };
+    activeYDocs.set(docId, entry);
+
+    ydoc.on('update', () => {
+        scheduleRedisSave(docId, ydoc);
+        scheduleKafkaSave(docId, ydoc, session_id);
+    });
+
+    return ydoc;
+};
+
+const scheduleRedisSave = (docId, ydoc) => {
+    const entry = activeYDocs.get(docId);
+    if (!entry) return;
+    if (entry.redisTimer) return;
+
+    entry.redisTimer = setTimeout(async () => {
+        try {
+            const state = Y.encodeStateAsUpdate(ydoc);
+            await redis.set(`session:ydoc:${docId}`, Buffer.from(state));
+        } catch (err) {
+            console.error(`Error saving YDoc ${docId} to Redis:`, err);
+        } finally {
+            if (activeYDocs.has(docId)) {
+                activeYDocs.get(docId).redisTimer = null;
+            }
+        }
+    }, 1000);
+};
+
+const scheduleKafkaSave = (docId, ydoc, session_id) => {
+    const entry = activeYDocs.get(docId);
+    if (!entry) return;
+    if (entry.dbTimer) return;
+
+    entry.dbTimer = setTimeout(async () => {
+        try {
+            const currentText = ydoc.getText('code').toString();
+            if (currentText === entry.lastText) {
+                entry.dbTimer = null;
+                return;
+            }
+            entry.lastText = currentText;
+
+            let userId;
+            let isHost = false;
+            if (docId.startsWith('host:')) {
+                userId = docId.split(':')[2];
+                isHost = true;
+            } else {
+                userId = docId.split(':')[2];
+            }
+
+            if (isHost) {
+                const query = 'UPDATE session_codes SET code=? WHERE session_id=? AND user_id=?';
+                await produceEvent(Topics.SESSION_TOPIC.name, {
+                    type: Events.DB_QUERY.type,
+                    payload: {
+                        desc: `host_code_change (Yjs debounced) in session_id=${session_id} user_id=${userId}`,
+                        query: query,
+                        params: [currentText, session_id, userId]
+                    },
+                    key: session_id
+                });
+            } else {
+                const [existing] = await db.execute('SELECT * FROM session_codes WHERE session_id=? AND user_id=?', [session_id, userId]);
+                let query, params;
+                if (existing.length > 0) {
+                    query = 'UPDATE session_codes SET code=? WHERE session_id=? AND user_id=?';
+                    params = [currentText, session_id, userId];
+                } else {
+                    query = 'INSERT INTO session_codes(session_id, user_id, code, code_lang) VALUES(?,?,?,?)';
+                    params = [session_id, userId, currentText, 'javascript'];
+                }
+                await produceEvent(Topics.SESSION_TOPIC.name, {
+                    type: Events.DB_QUERY.type,
+                    payload: {
+                        desc: `joinee_code_change (Yjs debounced) in session_id=${session_id} user_id=${userId}`,
+                        query: query,
+                        params: params
+                    },
+                    key: session_id
+                });
+            }
+        } catch (err) {
+            console.error(`Error debouncing YDoc ${docId} to database:`, err);
+        } finally {
+            if (activeYDocs.has(docId)) {
+                activeYDocs.get(docId).dbTimer = null;
+            }
+        }
+    }, 5000);
+};
+
+const flushYDoc = async (docId, session_id) => {
+    const entry = activeYDocs.get(docId);
+    if (!entry) return;
+
+    if (entry.redisTimer) clearTimeout(entry.redisTimer);
+    if (entry.dbTimer) clearTimeout(entry.dbTimer);
+
+    try {
+        const state = Y.encodeStateAsUpdate(entry.ydoc);
+        await redis.set(`session:ydoc:${docId}`, Buffer.from(state));
+
+        const currentText = entry.ydoc.getText('code').toString();
+        
+        let userId;
+        let isHost = false;
+        if (docId.startsWith('host:')) {
+            userId = docId.split(':')[2];
+            isHost = true;
+        } else {
+            userId = docId.split(':')[2];
+        }
+
+        if (isHost) {
+            const query = 'UPDATE session_codes SET code=? WHERE session_id=? AND user_id=?';
+            await produceEvent(Topics.SESSION_TOPIC.name, {
+                type: Events.DB_QUERY.type,
+                payload: {
+                    desc: `host_code_change (Yjs flush) in session_id=${session_id} user_id=${userId}`,
+                    query: query,
+                    params: [currentText, session_id, userId]
+                },
+                key: session_id
+            });
+        } else {
+            const [existing] = await db.execute('SELECT * FROM session_codes WHERE session_id=? AND user_id=?', [session_id, userId]);
+            let query, params;
+            if (existing.length > 0) {
+                query = 'UPDATE session_codes SET code=? WHERE session_id=? AND user_id=?';
+                params = [currentText, session_id, userId];
+            } else {
+                query = 'INSERT INTO session_codes(session_id, user_id, code, code_lang) VALUES(?,?,?,?)';
+                params = [session_id, userId, currentText, 'javascript'];
+            }
+            await produceEvent(Topics.SESSION_TOPIC.name, {
+                type: Events.DB_QUERY.type,
+                payload: {
+                    desc: `joinee_code_change (Yjs flush) in session_id=${session_id} user_id=${userId}`,
+                    query: query,
+                    params: params
+                },
+                key: session_id
+            });
+        }
+    } catch (err) {
+        console.error(`Error flushing YDoc ${docId}:`, err);
+    } finally {
+        activeYDocs.delete(docId);
+    }
+};
 
 const sessionRoomState = new Map();
 
@@ -93,6 +287,9 @@ async function setupSessionEvents(socket, io) {
 
     if (!socket.sessionDebounceTimers) {
         socket.sessionDebounceTimers = new Map();
+    }
+    if (!socket.activeYDocIds) {
+        socket.activeYDocIds = new Set();
     }
 
     socket.on('create_session', async () => {
@@ -191,11 +388,16 @@ async function setupSessionEvents(socket, io) {
         WHERE m.session_id = ? ORDER BY m.created_at ASC`, [session_id]);
 
 
+        const collabCached = await redis.get(`session:collaboration:${session_id}`);
+        const isCollabAllowed = collabCached === 'true';
+
         socket.emit('session_state', {
+            hostId: hostId,
             code: hostCode || '// Host has not started yet...', // Host's code
             language: hostLang,
             users: users,
             chat: chat,
+            collaborationAllowed: isCollabAllowed,
 
             userCode: myCode || '// Write your solution here...' // [NEW FIELD]
         });
@@ -304,6 +506,54 @@ async function setupSessionEvents(socket, io) {
     });
 
 
+    socket.on('yjs-sync-step-1', async ({ docId, stateVector }) => {
+        try {
+            socket.activeYDocIds.add(docId);
+            const session_id = docId.split(':')[1];
+            const ydoc = await getOrCreateYDoc(docId, session_id);
+            const update = Y.encodeStateAsUpdate(ydoc, new Uint8Array(stateVector));
+            socket.emit('yjs-sync-step-2', { docId, update: Buffer.from(update) });
+            const serverStateVector = Y.encodeStateVector(ydoc);
+            socket.emit('yjs-sync-step-1', { docId, stateVector: Buffer.from(serverStateVector) });
+        } catch (err) {
+            console.error('Error in yjs-sync-step-1:', err);
+        }
+    });
+
+    socket.on('yjs-update', async ({ docId, update }) => {
+        try {
+            socket.activeYDocIds.add(docId);
+            const session_id = docId.split(':')[1];
+            const ydoc = await getOrCreateYDoc(docId, session_id);
+            Y.applyUpdate(ydoc, new Uint8Array(update));
+            socket.to(session_id).emit('yjs-update', { docId, update: Buffer.from(update) });
+            if (!docId.startsWith('host:')) {
+                const userId = docId.split(':')[2];
+                socket.to(session_id).emit('joinee_active', { joineeId: userId });
+            }
+        } catch (err) {
+            console.error('Error in yjs-update:', err);
+        }
+    });
+
+    socket.on('yjs-awareness-update', ({ session_id, docId, update }) => {
+        try {
+            socket.to(session_id).emit('yjs-awareness-update', { docId, update: Buffer.from(update) });
+        } catch (err) {
+            console.error('Error in yjs-awareness-update:', err);
+        }
+    });
+
+    socket.on('toggle_collaboration', async ({ session_id, allowed }) => {
+        try {
+            await redis.set(`session:collaboration:${session_id}`, allowed ? 'true' : 'false');
+            socket.to(session_id).emit('collaboration_toggled', { allowed });
+        } catch (err) {
+            console.error('Error in toggle_collaboration:', err);
+        }
+    });
+
+
     socket.on('send_message', async ({ session_id, message }) => {
         const query = 'INSERT INTO messages(session_id, user_id, message) VALUES(?,?,?)'
         // await db.execute(query, [session_id, user_id, message]);
@@ -328,6 +578,23 @@ async function setupSessionEvents(socket, io) {
             clearTimeout(timerData.timer);
             await timerData.flush();
             socket.sessionDebounceTimers.delete(timerKey);
+        }
+
+        // Flush Host YDoc
+        const [sessionData] = await db.execute('SELECT host_id FROM session WHERE session_id = ?', [session_id]);
+        if (sessionData[0]) {
+            const hostId = sessionData[0].host_id;
+            await flushYDoc(`host:${session_id}:${hostId}`, session_id);
+        }
+
+        // Flush all active joinees' YDocs of this session
+        if (socket.activeYDocIds) {
+            for (const docId of socket.activeYDocIds) {
+                if (docId.includes(`:${session_id}:`)) {
+                    await flushYDoc(docId, session_id);
+                }
+            }
+            socket.activeYDocIds.clear();
         }
 
         await db.execute('UPDATE session SET is_ended=true WHERE session_id=?', [session_id]);
@@ -594,6 +861,17 @@ async function setupSessionEvents(socket, io) {
             }
             socket.sessionDebounceTimers.clear();
         }
+
+        // Flush all YDocs associated with this socket
+        if (socket.activeYDocIds) {
+            const session_id = socket.current_session_id;
+            for (const docId of socket.activeYDocIds) {
+                const sId = session_id || docId.split(':')[1];
+                await flushYDoc(docId, sId);
+            }
+            socket.activeYDocIds.clear();
+        }
+
         if (socket.current_session_id) cleanupSessionVoice(socket.id, socket.current_session_id);
     });
 

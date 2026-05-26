@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useSocket } from '../context/SocketContext';
 import { useAuth } from '../context/AuthContext';
 import CodeEditor from './CodeEditor';
+import * as Y from 'yjs';
 import {
     Share2, MessageSquare, X, Wifi, WifiOff,
     Info, Terminal, Monitor, LogOut, Code
@@ -16,8 +17,7 @@ const JoinView = () => {
     const navigate = useNavigate();
 
     // --- State ---
-    const [hostCode, setHostCode] = useState('// Waiting for host...');
-    const [myCode, setMyCode] = useState('// Write your solution here...');
+    const [hostId, setHostId] = useState(null);
     const [language, setLanguage] = useState('javascript');
     const [chatMessages, setChatMessages] = useState([]);
 
@@ -26,6 +26,30 @@ const JoinView = () => {
     const [chatOpen, setChatOpen] = useState(false);
     const [showSocketInfo, setShowSocketInfo] = useState(false);
     const [error, setError] = useState(null); // Added Error State
+    const [collaborationAllowed, setCollaborationAllowed] = useState(false);
+
+    // --- Yjs Collaboration ---
+    const activeClientYDocs = useRef(new Map());
+
+    const getOrCreateClientYDoc = (docId, socket) => {
+        if (activeClientYDocs.current.has(docId)) {
+            return activeClientYDocs.current.get(docId);
+        }
+
+        const ydoc = new Y.Doc();
+        activeClientYDocs.current.set(docId, ydoc);
+
+        const stateVector = Y.encodeStateVector(ydoc);
+        socket.emit('yjs-sync-step-1', { docId, stateVector: stateVector });
+
+        ydoc.on('update', (update, origin) => {
+            if (origin !== 'socket') {
+                socket.emit('yjs-update', { docId, update });
+            }
+        });
+
+        return ydoc;
+    };
     const handleError = (err) => {
         console.error("Socket Error:", err);
         setError(err.message || "Unknown error");
@@ -48,25 +72,20 @@ const JoinView = () => {
 
         // ... inside useEffect
         socket.on('session_state', (state) => {
-            if (state.code) setHostCode(state.code);
+            if (state.hostId) setHostId(state.hostId);
             if (state.language) setLanguage(state.language);
             if (state.chat) setChatMessages(state.chat);
-
-            // --- ADD THIS BLOCK ---
-            // If the server sent back my previous code, restore it.
-            if (state.userCode) {
-                setMyCode(state.userCode);
-            }
-        });
-
-        // 2. Real-time Host Updates
-        socket.on('host_code_update', (newCode) => {
-            setHostCode(newCode);
+            if (state.collaborationAllowed !== undefined) setCollaborationAllowed(state.collaborationAllowed);
         });
 
         socket.on('language_change', (newLang) => {
             setLanguage(newLang);
         });
+
+        const handleCollaborationToggled = ({ allowed }) => {
+            setCollaborationAllowed(allowed);
+        };
+        socket.on('collaboration_toggled', handleCollaborationToggled);
 
         // 3. Chat
         socket.on('chat_message', (msg) => {
@@ -84,14 +103,48 @@ const JoinView = () => {
             navigate('/');
         });
 
+        const handleYjsSyncStep1 = ({ docId, stateVector }) => {
+            const ydoc = activeClientYDocs.current.get(docId);
+            if (ydoc) {
+                const update = Y.encodeStateAsUpdate(ydoc, new Uint8Array(stateVector));
+                socket.emit('yjs-update', { docId, update });
+            }
+        };
+
+        const handleYjsSyncStep2 = ({ docId, update }) => {
+            const ydoc = activeClientYDocs.current.get(docId);
+            if (ydoc) {
+                Y.applyUpdate(ydoc, new Uint8Array(update), 'socket');
+            }
+        };
+
+        const handleYjsUpdate = ({ docId, update }) => {
+            const ydoc = activeClientYDocs.current.get(docId);
+            if (ydoc) {
+                Y.applyUpdate(ydoc, new Uint8Array(update), 'socket');
+            }
+        };
+
+        socket.on('yjs-sync-step-1', handleYjsSyncStep1);
+        socket.on('yjs-sync-step-2', handleYjsSyncStep2);
+        socket.on('yjs-update', handleYjsUpdate);
+
         return () => {
             socket.off('session_state');
-            socket.off('host_code_update');
             socket.off('language_change');
             socket.off('chat_message');
             socket.off('session_ended');
             socket.off('kicked');
             socket.off('error', handleError);
+            socket.off('collaboration_toggled', handleCollaborationToggled);
+            socket.off('yjs-sync-step-1', handleYjsSyncStep1);
+            socket.off('yjs-sync-step-2', handleYjsSyncStep2);
+            socket.off('yjs-update', handleYjsUpdate);
+
+            for (const [_, ydoc] of activeClientYDocs.current.entries()) {
+                ydoc.destroy();
+            }
+            activeClientYDocs.current.clear();
         };
     }, [socket, session_id, navigate]);
 
@@ -119,6 +172,14 @@ const JoinView = () => {
         setChatMessages(prev => [...prev, tempMsg]);
         socket.emit('send_message', { session_id, message: text });
     };
+
+    const hostDocId = hostId ? `host:${session_id}:${hostId}` : null;
+    const hostYDoc = (hostDocId && socket) ? getOrCreateClientYDoc(hostDocId, socket) : null;
+    const hostYText = hostYDoc ? hostYDoc.getText('code') : null;
+
+    const myDocId = user ? `joinee:${session_id}:${user.user_id}` : null;
+    const myYDoc = (myDocId && socket) ? getOrCreateClientYDoc(myDocId, socket) : null;
+    const myYText = myYDoc ? myYDoc.getText('code') : null;
 
     return (
         <div className="h-screen bg-[#0D1117] text-gray-300 flex flex-col overflow-hidden font-sans">
@@ -192,13 +253,18 @@ const JoinView = () => {
                                 <span className="text-xs text-blue-400 font-semibold flex items-center gap-2">
                                     <Wifi size={12} className="animate-pulse" /> LIVE STREAM FROM HOST
                                 </span>
-                                <span className="text-xs text-gray-500">Read-only</span>
+                                <span className="text-xs text-gray-500">
+                                    {collaborationAllowed ? (
+                                        <span className="text-emerald-400 font-bold flex items-center gap-1">● Co-op mode active (Writable)</span>
+                                    ) : 'Read-only'}
+                                </span>
                             </div>
                             <div className="flex-1 border border-blue-500/20 rounded-lg overflow-hidden shadow-[0_0_15px_rgba(59,130,246,0.1)]">
                                 <CodeEditor
-                                    value={hostCode}
+                                    yDocText={hostYText}
+                                    isCollaborative={true}
                                     language={language}
-                                    readOnly={true} // Vital: joinees cannot edit Host code
+                                    readOnly={!collaborationAllowed}
                                 />
                             </div>
                         </div>
@@ -215,9 +281,9 @@ const JoinView = () => {
                             </div>
                             <div className="flex-1 border border-emerald-500/20 rounded-lg overflow-hidden">
                                 <CodeEditor
-                                    value={myCode}
+                                    yDocText={myYText}
+                                    isCollaborative={true}
                                     language={language}
-                                    onChange={handleMyCodeChange}
                                     readOnly={false}
                                 />
                             </div>

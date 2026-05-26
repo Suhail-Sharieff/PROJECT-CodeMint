@@ -1,36 +1,66 @@
-# Whats added in v5?
-- i initially thought like migrating from MySQL to some wide column DB like Cassandra, since my app is write heavy, but then realized that then i would have to implement complex normalization and denormalization logic at my application layer, since the app does some complex joins, aggregations and computations
-- so i decided to stick with Mysql itself
-- further, the DB writes were still a thing of concern, though i had debouncing logic in the editor when i tested against 500 VUs, i observed DB connection pool exhuastion or resource exhuastion
-- Her's how i optimized it:
-- **Collaborative Coding Sessions**:
-   * In [session.controller.js](./backend/controller/session.controller.js), active workspace updates (`host_code_change` and `joinee_code_change`) write intermediate keystrokes directly to Redis (`session:code:${session_id}:${user_id}`).
-   * The database updates via Kafka are debounced to a maximum of once every **5 seconds**.
-   * On room termination (`end_session`) or user connection loss (`disconnect`), the active timers are immediately cleared and flushed to the database.
-   * `join_session` performs cache-first lookups to restore the latest state from Redis before falling back to MySQL.
+# What changes in v6
+- Current architecture is based on `Last write wins` strategy, implemented using Redis and kafka, decoupling DB writes from changes
+- But, the cursor in monaco editor keeps jumping(especially when the user types very fast)
+- This happens becoz, tho the DB writes are decoupled, still each sender emits their entire code to the receiver, the receiver needs to replace entire code with new one, even for a small change in the code, leading to cursor jumping
 
-2. **Competitive Coding Duels (Battles)**:
-   * In [battle.controller.js](./backend/controller/battle.controller.js), code changes are instantly pushed to Redis Hash structures (`battle:codes:${battle_id}:${user_id}`) under the respective `battle_question_id` key.
-   * Database updates are debounced by **5 seconds** and flushed immediately when the user disconnects or manually submits their solution (`submit_battle`).
-   * `join_battle` retrieves the participant's current codes directly from the Redis Hash, resolving cache misses from the database.
+- The solution is to use Operational Transformation (OT)
+### How Operational Transformation (OT) Works
+Instead of sending the whole file, clients send only the **operations** (incremental edits). An operation consists of three basic actions:
+* `Insert(position, text)`
+* `Delete(position, length)`
+* `Retain(length)` (moves the cursor forward without modifying)
 
-3. **Online Assessments (Tests)**:
-   * In [test.controller.js](./backend/controller/test.controller.js), the same pattern is applied. Code changes in `save_code` update the Redis Hash (`test:codes:${test_id}:${user_id}`) and queue a debounced Kafka db-query write.
-   * Debounce timers are flushed on `submit_test` or `disconnect`.
-   * `join_test` queries Redis first to load the student's current progress.
+When Client A and Client B concurrently edit the document, the server receives both operations and **transforms** them so they converge on the same text.
+For example, if the document is `"abc"`:
+* Client A inserts `"x"` at index 0 $\rightarrow$ `opA = Insert(0, "x")` $\rightarrow$ final text `"xabc"`
+* Client B inserts `"y"` at index 3 $\rightarrow$ `opB = Insert(3, "y")` $\rightarrow$ final text `"abcy"`
 
-| Metric | Earlier Optimized | Latest Optimized | Status |
-| :--- | :--- | :--- | :--- |
-| Failure Rate | 0.39% | 0.26% | ✅ Near-original |
-| Avg Response Time | 127.35ms | 113.99ms | ✅ Improved further |
-| Median Response Time | 129ms | 110ms | ✅ Much closer |
-| P90 Latency | 230.55ms | 216.79ms | ✅ Nearly identical |
-| P95 Latency | 253.63ms | 248.64ms | ✅ Almost exact match |
-| Max Response Time | 338.64ms | 369.63ms | ⚠ Slightly higher |
-| Total Requests | 3012 | 3008 | ✅ Equivalent |
-| Iterations | 1006 | 1004 | ✅ Equivalent |
-| Auth Success Rate | 99.4% | 99.6% | ✅ Excellent |
-| WebSocket Reliability | Excellent | Excellent | ✅ Stable |
-- They System perfoms efficiently upto 500 concurrent users per session/battle/tests
-## Most probably i would be stopping to work further on this project, Im always open to Open source contributions
-## ---------------THANK YOU-------------------
+If the server receives `opA` first, it transforms `opB` to account for `opA`'s insertion (shifting the insertion index of `opB` by +1 to index 4). The transformed operation `opB'` is applied to get `"xabcy"`.
+
+---
+
+### Implementation Plan: Changes Needed in Codemint
+
+To replace the full-buffer updates with an OT-based collaboration flow, you need to make the following changes:
+
+```mermaid
+sequenceDiagram
+    participant Client A (Monaco)
+    participant Server (Socket.IO + Redis)
+    participant Client B (Monaco)
+
+    Client A (Monaco)->>Server (Socket.IO + Redis): Send Op(Insert "x" at 0, baseRev: 5)
+    Note over Server (Socket.IO + Redis): Transform Op against concurrent edits
+    Server (Socket.IO + Redis)-->>Client A (Monaco): Acknowledge Op (newRev: 6)
+    Server (Socket.IO + Redis)->>Client B (Monaco): Broadcast Transformed Op(Insert "x" at 0)
+    Note over Client B (Monaco): Apply Op locally using Monaco Editor Model API
+```
+
+#### 1. Client-Side Changes (UI)
+* **Editor Integration**: Instead of sending code changes on simple keystrokes, listen to the raw changes of the code editor (e.g., Monaco Editor's `onDidChangeModelContent`). Monaco provides an event containing an array of `changes` with `range`, `rangeLength`, and `text`.
+* **OT Client Lifecycle**: Implement an OT client engine (often using the `ot.js` library). The client must track:
+  1. `revision`: The server-confirmed document revision index.
+  2. `pendingOp`: The operation currently sent to the server awaiting an acknowledgment.
+  3. `bufferOp`: Operations the user performed locally while waiting for the server's ack.
+* When the server acknowledges a sent operation, the client sends its buffered operations next.
+
+#### 2. Server-Side Changes (`backend`)
+* **Document History Tracking**: In [session.controller.js](file:///c:/Users/suhai/Desktop/PROJECT-CodeMint/backend/controller/session.controller.js), maintain a history log of operations and the current revision number in Redis for every active session.
+* **Transformation Logic**:
+  When the server receives an operation `op` at base revision `clientRev`:
+  1. If `clientRev === serverRev` (no concurrent edits), apply `op` to the document in Redis, increment `serverRev`, and broadcast `op` to other participants.
+  2. If `clientRev < serverRev` (concurrent edits occurred), the server transforms `op` against all operations in the history log from `clientRev` to `serverRev`. Apply the transformed operation `op'`, increment `serverRev`, save it to the history log, broadcast `op'`, and send an acknowledgment back to the sender.
+
+#### 3. Database Caching Changes
+* The periodic Kafka database updates will write the current consolidated text string from the Redis state to MySQL, keeping the database writes decoupled from the WebSocket operational throughput.
+
+---
+
+### 💡 Highly Recommended Alternative: CRDTs via Yjs
+While OT is powerful, writing transformation math manually is complex and prone to edge-case bugs. A modern, cleaner alternative is **Yjs**, a high-performance **CRDT (Conflict-free Replicated Data Type)** library.
+
+Implementing Yjs in Codemint is significantly easier:
+1. **Client-side**:
+   Use `@monaco-editor/react` (or your raw editor) paired with `yjs` and `y-monaco` bindings. Yjs handles cursor positions and text insertions automatically.
+2. **Server-side**:
+   Run a `y-websocket` server provider. You can integrate this directly into [socket_events.js](file:///c:/Users/suhai/Desktop/PROJECT-CodeMint/backend/socket_events.js). Instead of custom event listeners, Socket.IO wraps Yjs binary state updates, and Yjs takes care of syncing and resolving conflicts out of the box.

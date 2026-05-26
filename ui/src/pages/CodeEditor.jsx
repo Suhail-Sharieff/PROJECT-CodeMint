@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import Editor from '@monaco-editor/react';
+import { MonacoBinding } from 'y-monaco';
 import {
   Play, CheckCircle, XCircle, Loader2,
   Terminal, Plus, Trash2, Lock
@@ -30,7 +31,9 @@ const CodeEditor = ({
   initialTestCases,
   onScoreUpdate,
   questionId,
-  isBattle=false
+  isBattle=false,
+  yDocText,
+  isCollaborative
 }) => {
   // --- Refs for Debouncing ---
   const editorRef = useRef(null);
@@ -50,6 +53,37 @@ const CodeEditor = ({
   const [isLanguagesLoading, setIsLanguagesLoading] = useState(false);
   const [panelHeight, setPanelHeight] = useState(250);
   const [isDragging, setIsDragging] = useState(false);
+  const [editorMounted, setEditorMounted] = useState(false);
+  const bindingRef = useRef(null);
+
+  useEffect(() => {
+    if (!editorRef.current || !yDocText) {
+      if (bindingRef.current) {
+        bindingRef.current.destroy();
+        bindingRef.current = null;
+      }
+      return;
+    }
+
+    if (bindingRef.current) {
+      bindingRef.current.destroy();
+    }
+
+    const editor = editorRef.current;
+    const binding = new MonacoBinding(
+      yDocText,
+      editor.getModel(),
+      new Set([editor])
+    );
+    bindingRef.current = binding;
+
+    return () => {
+      if (bindingRef.current) {
+        bindingRef.current.destroy();
+        bindingRef.current = null;
+      }
+    };
+  }, [yDocText, editorMounted]);
 
   // --- DEBOUNCE LOGIC START ---
 
@@ -92,6 +126,11 @@ const CodeEditor = ({
   // 4. Handle Editor Mount (Attach Blur Listeners)
   const handleEditorDidMount = (editor, monaco) => {
     editorRef.current = editor;
+    setEditorMounted(true);
+
+    if (isCollaborative) {
+      return;
+    }
 
     // Listen for changes to create Deltas (Optional, but good for detailed history)
     editor.onDidChangeModelContent((e) => {
@@ -148,7 +187,7 @@ const CodeEditor = ({
           const defaultLangObj = response.data.find(l => l.name.includes("JavaScript")) || response.data[0];
           const defaultName = defaultLangObj.name;
           if (onLanguageChange) onLanguageChange(defaultName);
-          if (!value && onChange) {
+          if (!value && onChange && !isCollaborative) {
             const simpleKey = getMonacoLanguage(defaultName);
             onChange(BOILERPLATES[simpleKey] || BOILERPLATES.plaintext);
           }
@@ -188,16 +227,24 @@ const CodeEditor = ({
     const simpleKey = getMonacoLanguage(newLangName);
     const template = BOILERPLATES[simpleKey] || BOILERPLATES.plaintext;
     
-    // Update immediately
-    if (onChange) onChange(template);
-    
-    // Also trigger an emit since the content changed drastically
-    latestValueRef.current = template;
-    scheduleEmit({ type: "SNAPSHOT", code: template, questionId, ts: Date.now() });
+    if (isCollaborative) {
+      if (yDocText) {
+        yDocText.delete(0, yDocText.length);
+        yDocText.insert(0, template);
+      }
+    } else {
+      // Update immediately
+      if (onChange) onChange(template);
+      
+      // Also trigger an emit since the content changed drastically
+      latestValueRef.current = template;
+      scheduleEmit({ type: "SNAPSHOT", code: template, questionId, ts: Date.now() });
+    }
   };
 
   // --- Intercept Editor Change ---
   const handleEditorChange = (val) => {
+    if (isCollaborative) return;
     // 1. Update Refs for the debouncer
     latestValueRef.current = val ?? "";
     
@@ -281,7 +328,7 @@ const CodeEditor = ({
       if (questionId) {
         const response = await api.post(`/editor/submitCode`, {
           language_id,
-          source_code: value, // Uses current prop value (should be synced)
+          source_code: editorRef.current ? editorRef.current.getValue() : value, // Uses current editor content or fallback
           question_id: questionId,
           isBattle:isBattle
         });
@@ -293,7 +340,7 @@ const CodeEditor = ({
         const promises = testCases.map(testCase =>
           api.post(`/editor/submitCode`, {
             language_id,
-            source_code: value,
+            source_code: editorRef.current ? editorRef.current.getValue() : value,
             stdin: testCase.input,
             expected_output: testCase.expected,
             isBattle:isBattle
@@ -390,9 +437,9 @@ const CodeEditor = ({
         <Editor
           height="100%"
           language={getMonacoLanguage(language)}
-          value={value}
+          value={isCollaborative ? undefined : value}
           onMount={handleEditorDidMount} // ADDED: Mount handler for Blur/Deltas
-          onChange={handleEditorChange}  // UPDATED: Wrapper for onChange + Debounce
+          onChange={isCollaborative ? undefined : handleEditorChange}  // UPDATED: Wrapper for onChange + Debounce
           theme="vs-dark"
           options={{
             minimap: { enabled: false },

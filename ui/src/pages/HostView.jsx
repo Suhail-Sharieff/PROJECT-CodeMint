@@ -3,10 +3,11 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useSocket } from '../context/SocketContext';
 import { useAuth } from '../context/AuthContext';
 import CodeEditor from './CodeEditor'; // Ensure this path is correct
+import * as Y from 'yjs';
 import {
     Share2, Users, MessageSquare,
     X, Wifi, WifiOff, Info, Terminal, Eye, LogOut,
-    UserX, MicOff
+    UserX, MicOff, Lock, Unlock
 } from 'lucide-react';
 import { VoiceChatControls } from '../components/VoiceChatControls';
 
@@ -17,7 +18,6 @@ const HostView = () => {
     const navigate = useNavigate();
 
     // --- State Management ---
-    const [code, setCode] = useState('// Start typing your solution here...');
     const [language, setLanguage] = useState('javascript');
     const [users, setUsers] = useState([]);
     const [chatMessages, setChatMessages] = useState([]);
@@ -27,6 +27,30 @@ const HostView = () => {
     const [chatOpen, setChatOpen] = useState(false);
     const [showSocketInfo, setShowSocketInfo] = useState(false);
     const [showEndModal, setShowEndModal] = useState(false);
+    const [collaborationAllowed, setCollaborationAllowed] = useState(false);
+
+    // --- Yjs Collaboration ---
+    const activeClientYDocs = useRef(new Map());
+
+    const getOrCreateClientYDoc = (docId, socket) => {
+        if (activeClientYDocs.current.has(docId)) {
+            return activeClientYDocs.current.get(docId);
+        }
+
+        const ydoc = new Y.Doc();
+        activeClientYDocs.current.set(docId, ydoc);
+
+        const stateVector = Y.encodeStateVector(ydoc);
+        socket.emit('yjs-sync-step-1', { docId, stateVector: stateVector });
+
+        ydoc.on('update', (update, origin) => {
+            if (origin !== 'socket') {
+                socket.emit('yjs-update', { docId, update });
+            }
+        });
+
+        return ydoc;
+    };
 
     // --- Socket Event Listeners ---
     useEffect(() => {
@@ -35,10 +59,10 @@ const HostView = () => {
         socket.emit('join_session', { session_id });
 
         const handleSessionState = (state) => {
-            if (state.code) setCode(state.code);
             if (state.language) setLanguage(state.language);
             if (state.users) setUsers(state.users);
             if (state.chat) setChatMessages(state.chat);
+            if (state.collaborationAllowed !== undefined) setCollaborationAllowed(state.collaborationAllowed);
         };
         const handleJoineeJoined = (newUser) => {
             setUsers(prev => prev.some(p => p.id === newUser.id) ? prev : [...prev, newUser]);
@@ -48,22 +72,60 @@ const HostView = () => {
             if (selectedJoineeId === userId) setSelectedJoineeId('');
         };
         const handleChatMessage = (msg) => setChatMessages(prev => [...prev, msg]);
-        const handleJoineeCodeUpdate = ({ joineeId, code: joineeCode }) => {
-            setJoineeCodes(prev => new Map(prev).set(joineeId, joineeCode));
+        const handleJoineeActive = ({ joineeId }) => {
+            setJoineeCodes(prev => new Map(prev).set(joineeId, true));
+        };
+        const handleCollaborationToggled = ({ allowed }) => {
+            setCollaborationAllowed(allowed);
+        };
+
+        const handleYjsSyncStep1 = ({ docId, stateVector }) => {
+            const ydoc = activeClientYDocs.current.get(docId);
+            if (ydoc) {
+                const update = Y.encodeStateAsUpdate(ydoc, new Uint8Array(stateVector));
+                socket.emit('yjs-update', { docId, update });
+            }
+        };
+
+        const handleYjsSyncStep2 = ({ docId, update }) => {
+            const ydoc = activeClientYDocs.current.get(docId);
+            if (ydoc) {
+                Y.applyUpdate(ydoc, new Uint8Array(update), 'socket');
+            }
+        };
+
+        const handleYjsUpdate = ({ docId, update }) => {
+            const ydoc = activeClientYDocs.current.get(docId);
+            if (ydoc) {
+                Y.applyUpdate(ydoc, new Uint8Array(update), 'socket');
+            }
         };
 
         socket.on('session_state', handleSessionState);
         socket.on('joinee_joined', handleJoineeJoined);
         socket.on('joinee_left', handleJoineeLeft);
         socket.on('chat_message', handleChatMessage);
-        socket.on('joinee_code_update', handleJoineeCodeUpdate);
+        socket.on('joinee_active', handleJoineeActive);
+        socket.on('collaboration_toggled', handleCollaborationToggled);
+        socket.on('yjs-sync-step-1', handleYjsSyncStep1);
+        socket.on('yjs-sync-step-2', handleYjsSyncStep2);
+        socket.on('yjs-update', handleYjsUpdate);
 
         return () => {
             socket.off('session_state', handleSessionState);
             socket.off('joinee_joined', handleJoineeJoined);
             socket.off('joinee_left', handleJoineeLeft);
             socket.off('chat_message', handleChatMessage);
-            socket.off('joinee_code_update', handleJoineeCodeUpdate);
+            socket.off('joinee_active', handleJoineeActive);
+            socket.off('collaboration_toggled', handleCollaborationToggled);
+            socket.off('yjs-sync-step-1', handleYjsSyncStep1);
+            socket.off('yjs-sync-step-2', handleYjsSyncStep2);
+            socket.off('yjs-update', handleYjsUpdate);
+
+            for (const [_, ydoc] of activeClientYDocs.current.entries()) {
+                ydoc.destroy();
+            }
+            activeClientYDocs.current.clear();
         };
     }, [socket, session_id, selectedJoineeId]);
 
@@ -84,14 +146,17 @@ const HostView = () => {
         navigate("/");
     };
 
-    const handleCodeChange = (newCode) => {
-        setCode(newCode);
-        socket?.emit('host_code_change', { session_id, new_code: newCode });
-    };
+    const handleCodeChange = () => {};
 
     const handleLanguageChange = (newLang) => {
         setLanguage(newLang);
         socket?.emit('host_language_change', { session_id, language: newLang });
+    };
+
+    const handleToggleCollaboration = () => {
+        const nextVal = !collaborationAllowed;
+        setCollaborationAllowed(nextVal);
+        socket?.emit('toggle_collaboration', { session_id, allowed: nextVal });
     };
 
     const handleSendMessage = (text) => {
@@ -123,6 +188,14 @@ const HostView = () => {
         }
     };
 
+    const hostDocId = user ? `host:${session_id}:${user.user_id}` : null;
+    const hostYDoc = (hostDocId && socket) ? getOrCreateClientYDoc(hostDocId, socket) : null;
+    const hostYText = hostYDoc ? hostYDoc.getText('code') : null;
+
+    const joineeDocId = selectedJoineeId ? `joinee:${session_id}:${selectedJoineeId}` : null;
+    const joineeYDoc = (joineeDocId && socket) ? getOrCreateClientYDoc(joineeDocId, socket) : null;
+    const joineeYText = joineeYDoc ? joineeYDoc.getText('code') : null;
+
     return (
         <div className="h-screen bg-[#0D1117] text-gray-300 flex flex-col overflow-hidden font-sans">
 
@@ -147,6 +220,18 @@ const HostView = () => {
                 </div>
                 <div className="flex items-center gap-3">
                     <VoiceChatControls roomId={session_id} roomType="session" />
+                    <button
+                        onClick={handleToggleCollaboration}
+                        className={`flex items-center gap-2 px-4 py-2 border rounded-lg transition-all text-sm font-semibold shadow-sm ${
+                            collaborationAllowed
+                                ? 'bg-amber-500/10 border-amber-500/40 text-amber-400 hover:bg-amber-600 hover:text-white'
+                                : 'bg-blue-600/10 border-blue-500/30 text-blue-400 hover:bg-blue-600 hover:text-white'
+                        }`}
+                        title={collaborationAllowed ? 'Disable two-way collaborative editing' : 'Allow joinees to edit code'}
+                    >
+                        {collaborationAllowed ? <Unlock size={16} /> : <Lock size={16} />}
+                        <span>{collaborationAllowed ? 'Co-op Active' : 'Enable Co-op'}</span>
+                    </button>
                     <button onClick={() => setShowEndModal(true)} className="flex items-center gap-2 px-4 py-2 bg-red-600/10 border border-red-600/50 text-red-400 hover:bg-red-600 hover:text-white font-semibold rounded-lg transition-all">
                         <LogOut size={16} />
                         <span>End Session</span>
@@ -181,9 +266,9 @@ const HostView = () => {
                     {activeTab === 'code' && (
                         <div className="h-full animate-in fade-in duration-300">
                             <CodeEditor
-                                value={code}
+                                yDocText={hostYText}
+                                isCollaborative={true}
                                 language={language}
-                                onChange={handleCodeChange}
                                 onLanguageChange={handleLanguageChange}
                             />
                         </div>
@@ -247,7 +332,12 @@ const HostView = () => {
                                     {selectedJoineeId && <span className="text-emerald-400 flex items-center gap-1"><Wifi size={10} /> Live Feed</span>}
                                 </div>
                                 <div className="flex-1">
-                                    <CodeEditor value={getMonitoredCode()} language={language} readOnly={true} />
+                                    <CodeEditor
+                                        yDocText={joineeYText}
+                                        isCollaborative={true}
+                                        language={language}
+                                        readOnly={!collaborationAllowed}
+                                    />
                                 </div>
                             </div>
                         </div>
